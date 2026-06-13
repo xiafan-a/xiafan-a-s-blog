@@ -1,0 +1,144 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+### 日志文件 ###
+log/
+logs/
+*.log
+*.log.gz
+
+### 环境配置文件（敏感信息）###
+.env
+.env.local
+.env.*.local
+application-dev.properties
+application-local.properties
+application-*.yml
+!application-example.yml
+!application-example.properties
+
+### 系统文件 ###
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+*.swp
+*.swo
+*~
+desktop.ini
+
+### Maven / Gradle 临时文件 ###
+.mvn/
+mvnw
+mvnw.cmd
+*.releaseBackup
+.gradle/
+gradle/
+gradlew
+gradlew.bat
+
+### 编译输出 ###
+*.class
+*.jar
+*.war
+*.ear
+out/
+
+### 测试相关 ###
+test-output/
+*.log
+coverage/
+.surefire/
+.failsafe/
+
+### 临时文件 ###
+*.tmp
+*.temp
+*.cache
+*.dump
+*.dump.*
+
+### 密钥和证书文件 ###
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+*.cer
+*.p8
+*.pkcs12
+
+### 数据库文件 ###
+*.db
+*.sqlite
+*.sqlite3
+*.h2.db
+*.lock
+*.db.tmp
+
+### IDE 配置目录（更完整）###
+*.code-workspace
+.idea_modules/
+*.classpath
+*.project
+.settings/
+.factorypath
+
+### 项目特定配置 ###
+application-*.properties
+!application-example.properties
+!application-test-template.properties
+config/
+*.local.properties
+
+### 前端相关（如果项目有）###
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+dist/
+build/
+.next/
+.nuxt/
+.vuepress/dist/
+
+### Docker ###
+*.pid
+Dockerfile.tmp
+.dockerignore

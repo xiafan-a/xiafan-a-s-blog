@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"from entity.Tool import RESPONSE_TYPE_SUMMARY; print\\(RESPONSE_TYPE_SUMMARY\\)\")"
+    ]
+  }
+}
