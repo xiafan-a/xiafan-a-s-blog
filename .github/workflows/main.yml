@@ -133,6 +133,9 @@ jobs:
             --exclude='*.pyc' \
             --exclude='.git' \
             --exclude='.idea' \
+            --exclude='venv' \
+            --exclude='.env' \
+            --exclude='.env.*' \
             artifacts/python-code/ \
             $SERVER_USER@$SERVER_HOST:/root/blog/backend/python/fastApiProject/
           
