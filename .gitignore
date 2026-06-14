@@ -123,7 +123,7 @@ coverage/
 application-*.properties
 !application-example.properties
 !application-test-template.properties
-config/
+### config/
 *.local.properties
 
 ### 前端相关（如果项目有）###
