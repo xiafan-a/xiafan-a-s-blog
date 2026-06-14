@@ -33,7 +33,7 @@ build/
 .vscode/
 
 ### 日志文件 ###
-log/
+###log/
 logs/
 *.log
 *.log.gz
