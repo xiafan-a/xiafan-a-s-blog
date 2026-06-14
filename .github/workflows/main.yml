@@ -17,18 +17,24 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
+          cache: 'npm'  # 启用 npm 缓存加速构建
 
       - name: Build blog-cms
         working-directory: ./NBlog-master/blog-cms
         run: |
-          npm ci
+          npm install
           npm run build
 
       - name: Build blog-view
         working-directory: ./NBlog-master/blog-view
         run: |
-          npm ci
+          npm install
           npm run build
+
+      - name: List dist files (debug)
+        run: |
+          ls -la NBlog-master/blog-cms/dist/ || echo "cms dist not found"
+          ls -la NBlog-master/blog-view/dist/ || echo "view dist not found"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -38,7 +44,7 @@ jobs:
             NBlog-master/blog-cms/dist
             NBlog-master/blog-view/dist
           retention-days: 3
-
+          
   build-java:
     name: Build Java Backend
     runs-on: ubuntu-latest
