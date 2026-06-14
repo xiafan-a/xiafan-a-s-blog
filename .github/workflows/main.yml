@@ -81,6 +81,7 @@ jobs:
     name: Deploy to Server
     needs: [build-frontend, build-java, build-python]
     runs-on: ubuntu-latest
+    environment: host
     if: github.event_name == 'push'
     steps:
       - name: Checkout
