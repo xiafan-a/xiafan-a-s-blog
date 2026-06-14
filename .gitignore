@@ -142,3 +142,21 @@ build/
 *.pid
 Dockerfile.tmp
 .dockerignore
+
+
+
+# Python 缓存文件
+__pycache__/
+*.pyc
+*.pyo
+# Python 虚拟环境
+venv/
+env/
+.env/
+.venv/
+
+# 或者更具体的
+venv/bin/
+venv/lib/
+venv/include/
+venv/pyvenv.cfg

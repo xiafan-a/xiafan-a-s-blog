@@ -1,7 +1,25 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python -c \"from entity.Tool import RESPONSE_TYPE_SUMMARY; print\\(RESPONSE_TYPE_SUMMARY\\)\")"
+      "Bash(python -c \"from entity.Tool import RESPONSE_TYPE_SUMMARY; print\\(RESPONSE_TYPE_SUMMARY\\)\")",
+      "Bash(python -m venv venv)",
+      "Bash(py -m venv venv)",
+      "Bash(./venv/Scripts/python.exe -m pip install -r requirements.txt)",
+      "Bash(./venv/Scripts/python.exe main.py)",
+      "Bash(./venv/Scripts/python.exe -m pip install python-multipart -q)",
+      "Bash(./venv/Scripts/python.exe -m pip install psycopg2 -q)",
+      "Bash(./venv/Scripts/python.exe -c ' *)",
+      "Bash(./venv/Scripts/python.exe -c \"import psycopg2; print\\(psycopg2.__version__\\)\")",
+      "Bash(./venv/Scripts/python.exe -m pip uninstall psycopg2 -y -q)",
+      "Bash(./venv/Scripts/python.exe -m pip install psycopg2-binary -q)",
+      "Bash(./venv/Scripts/python.exe -m pip install psycopg2-binary==2.10.0 -q)",
+      "Bash(sc queryex *)",
+      "Bash(sc query *)",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":5432\")",
+      "Bash(tasklist /FI \"PID eq 11536\")",
+      "Bash(tasklist //FI \"PID eq 11536\")",
+      "Bash(./venv/Scripts/python.exe -m pip install setuptools -q)"
     ]
   }
 }

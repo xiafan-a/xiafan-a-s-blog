@@ -244,6 +244,51 @@ class RedisService:
         except Exception as e:
             print(f"Redis缓存清除失败: {e}")
 
+    def cache_guess_words_list(self, words_data: str, ttl: int = 10800):
+        """
+        缓存猜字列表
+        Args:
+            words_data: JSON序列化的猜字列表数据
+            ttl: 过期时间（秒），默认3小时
+        """
+        if not self.is_connected():
+            return
+
+        try:
+            cache_key = "/wordGame/guess_words/list"
+            self.client.setex(cache_key, ttl, words_data)
+        except Exception as e:
+            print(f"Redis缓存写入失败: {e}")
+
+    def get_cached_guess_words_list(self) -> Optional[str]:
+        """
+        获取缓存的猜字列表
+        Returns:
+            JSON序列化的猜字列表数据，如果没有缓存则返回None
+        """
+        if not self.is_connected():
+            return None
+
+        try:
+            cache_key = "/wordGame/guess_words/list"
+            return self.client.get(cache_key)
+        except Exception as e:
+            print(f"Redis缓存读取失败: {e}")
+        return None
+
+    def invalidate_guess_words_cache(self):
+        """
+        使猜字列表缓存失效
+        """
+        if not self.is_connected():
+            return
+
+        try:
+            cache_key = "/wordGame/guess_words/list"
+            self.client.delete(cache_key)
+        except Exception as e:
+            print(f"Redis缓存清除失败: {e}")
+
 
 # 全局Redis服务实例
 redis_service = RedisService()

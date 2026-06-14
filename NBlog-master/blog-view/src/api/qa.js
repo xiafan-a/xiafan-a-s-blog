@@ -1,7 +1,7 @@
 import axios from 'axios'
 
-const CHAT_API_BASE = '/api/v1'
-
+// const CHAT_API_BASE = '/api/v1'
+const CHAT_API_BASE = 'http://localhost:8100/api/v1'
 // 普通问答
 export function chat(message, knowledgeBaseId, history) {
 	return axios.post(`${CHAT_API_BASE}/chat`, {

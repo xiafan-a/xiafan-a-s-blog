@@ -24,7 +24,7 @@ async def startup_event():
     # Import and register built-in tools
     from service.builtInTools import register_builtin_tools
     register_builtin_tools()
-    print("✓ Built-in tools registered")
+    print("[OK] Built-in tools registered")
 
 # 添加CORS中间件
 app.add_middleware(

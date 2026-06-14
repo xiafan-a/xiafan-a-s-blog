@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const API_BASE = '/api/v1'
+// const API_BASE = '/api/v1'
+const API_BASE = 'http://localhost:8100/api/v1'
 
 // const API_BASE = 'http://localhost:8100/api/v1' // 替换为你的后端API地址
 function getAuthHeaders() {

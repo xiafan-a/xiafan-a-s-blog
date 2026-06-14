@@ -1,6 +1,7 @@
 import axios from 'axios'
 
-const CHAT_API_BASE = '/api/v1'
+// const CHAT_API_BASE = '/api/v1'
+const CHAT_API_BASE = 'http://localhost:8100/api/v1'
 
 // 创建会话
 export function createSession(data) {

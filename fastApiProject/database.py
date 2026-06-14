@@ -10,7 +10,7 @@ from datetime import datetime
 load_dotenv()
 
 # 获取数据库URL
-DATABASE_URL = os.getenv("POSTGRES_HOST", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
 
 # 创建数据库引擎
 engine = create_engine(DATABASE_URL)
