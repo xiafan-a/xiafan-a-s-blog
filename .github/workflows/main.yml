@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'  
+          node-version: '20'
 
       - name: Build blog-cms
         working-directory: ./NBlog-master/blog-cms
@@ -78,67 +78,67 @@ jobs:
           retention-days: 3
 
   deploy:
-  name: Deploy to Server
-  needs: [build-frontend, build-java, build-python]
-  runs-on: ubuntu-latest
-  if: github.event_name == 'push'
-  steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+    name: Deploy to Server
+    needs: [build-frontend, build-java, build-python]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Download all artifacts
-      uses: actions/download-artifact@v4
-      with:
-        path: artifacts
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
 
-    - name: Setup SSH
-      uses: webfactory/ssh-agent@v0.8.0
-      with:
-        ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.8.0
+        with:
+          ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
 
-    - name: Deploy Frontend
-      env:
-        SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        SERVER_USER: ${{ secrets.SERVER_USER }}
-      run: |
-        # 复制 CMS 前端文件
-        rsync -av --delete \
-          artifacts/frontend-dist/blog-cms/dist/ \
-          $SERVER_USER@$SERVER_HOST:/root/blog/frontend/cms/dist/
-        
-        # 复制 View 前端文件
-        rsync -av --delete \
-          artifacts/frontend-dist/blog-view/dist/ \
-          $SERVER_USER@$SERVER_HOST:/root/blog/frontend/view/dist/
-        
-        # 重载 Nginx
-        ssh $SERVER_USER@$SERVER_HOST "docker exec blog-nginx nginx -s reload"
+      - name: Deploy Frontend
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          # 复制 CMS 前端文件
+          rsync -av --delete \
+            artifacts/frontend-dist/blog-cms/dist/ \
+            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/cms/dist/
+          
+          # 复制 View 前端文件
+          rsync -av --delete \
+            artifacts/frontend-dist/blog-view/dist/ \
+            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/view/dist/
+          
+          # 重载 Nginx
+          ssh $SERVER_USER@$SERVER_HOST "docker exec blog-nginx nginx -s reload"
 
-    - name: Deploy Java
-      env:
-        SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        SERVER_USER: ${{ secrets.SERVER_USER }}
-      run: |
-        # 覆盖 jar 包
-        scp artifacts/java-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-api-0.0.1.jar
-        
-        # 重启 Java 服务
-        ssh $SERVER_USER@$SERVER_HOST "docker restart blog-java"
+      - name: Deploy Java
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          # 覆盖 jar 包
+          scp artifacts/java-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-api-0.0.1.jar
+          
+          # 重启 Java 服务
+          ssh $SERVER_USER@$SERVER_HOST "docker restart blog-java"
 
-    - name: Deploy Python
-      env:
-        SERVER_HOST: ${{ secrets.SERVER_HOST }}
-        SERVER_USER: ${{ secrets.SERVER_USER }}
-      run: |
-        # 同步 Python 代码
-        rsync -av --delete \
-          --exclude='.venv' \
-          --exclude='__pycache__' \
-          --exclude='*.pyc' \
-          --exclude='.git' \
-          --exclude='.idea' \
-          artifacts/python-code/fastApiProject/ \
-          $SERVER_USER@$SERVER_HOST:/root/blog/backend/python/fastApiProject/
-        
-        # 重启 Python 服务
-        ssh $SERVER_USER@$SERVER_HOST "docker restart blog-python"
+      - name: Deploy Python
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          # 同步 Python 代码
+          rsync -av --delete \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='.git' \
+            --exclude='.idea' \
+            artifacts/python-code/fastApiProject/ \
+            $SERVER_USER@$SERVER_HOST:/root/blog/backend/python/fastApiProject/
+          
+          # 重启 Python 服务
+          ssh $SERVER_USER@$SERVER_HOST "docker restart blog-python"
