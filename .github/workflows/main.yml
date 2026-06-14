@@ -16,19 +16,18 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
-          # cache: 'npm'  # 删除这行
+          node-version: '20'  # 升级到 20
 
       - name: Build blog-cms
         working-directory: ./NBlog-master/blog-cms
         run: |
-          npm install
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Build blog-view
         working-directory: ./NBlog-master/blog-view
         run: |
-          npm install
+          npm install --no-audit --no-fund
           npm run build
 
       - name: Upload artifacts
