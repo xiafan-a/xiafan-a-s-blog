@@ -1,0 +1,133 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-frontend:
+    name: Build Vue Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+
+      - name: Build blog-cms
+        working-directory: ./NBlog-master/blog-cms
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build blog-view
+        working-directory: ./NBlog-master/blog-view
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-dist
+          path: |
+            NBlog-master/blog-cms/dist
+            NBlog-master/blog-view/dist
+          retention-days: 3
+
+  build-java:
+    name: Build Java Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '8'
+          distribution: 'temurin'
+
+      - name: Build with Maven
+        working-directory: ./blog-api
+        run: mvn clean package -DskipTests
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: java-jar
+          path: blog-api/target/*.jar
+          retention-days: 3
+
+  build-python:
+    name: Build Python Backend
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-code
+          path: fastApiProject
+          retention-days: 3
+
+  # deploy:
+  #   name: Deploy to Server
+  #   needs: [build-frontend, build-java, build-python]
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'push'
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Download all artifacts
+  #       uses: actions/download-artifact@v4
+  #       with:
+  #         path: artifacts
+
+  #     - name: Setup RSYNC
+  #       run: sudo apt-get update && sudo apt-get install -y rsync
+
+  #     - name: Setup SSH
+  #       uses: webfactory/ssh-agent@v0.8.0
+  #       with:
+  #         ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
+
+  #     - name: Deploy Frontend
+  #       env:
+  #         SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  #         SERVER_USER: ${{ secrets.SERVER_USER }}
+  #       run: |
+  #         ssh $SERVER_USER@$SERVER_HOST "mkdir -p /data/nginx/html/cms /data/nginx/html/view"
+  #         scp -r artifacts/frontend-dist/blog-cms/dist/* $SERVER_USER@$SERVER_HOST:/data/nginx/html/cms/
+  #         scp -r artifacts/frontend-dist/blog-view/dist/* $SERVER_USER@$SERVER_HOST:/data/nginx/html/view/
+
+  #     - name: Deploy Java
+  #       env:
+  #         SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  #         SERVER_USER: ${{ secrets.SERVER_USER }}
+  #       run: |
+  #         scp artifacts/java-jar/*.jar $SERVER_USER@$SERVER_HOST:/data/java-app/blog-api.jar
+  #         ssh $SERVER_USER@$SERVER_HOST "cd /data/java-app && docker-compose restart java-app || true"
+
+  #     - name: Deploy Python
+  #       env:
+  #         SERVER_HOST: ${{ secrets.SERVER_HOST }}
+  #         SERVER_USER: ${{ secrets.SERVER_USER }}
+  #       run: |
+  #         rsync -av --delete \
+  #             --exclude='.venv' \
+  #             --exclude='__pycache__' \
+  #             --exclude='*.pyc' \
+  #             --exclude='.git' \
+  #             --exclude='.idea' \
+  #             artifacts/python-code/fastApiProject/ \
+  #             $SERVER_USER@$SERVER_HOST:/data/python-app/
+  #         # 不安装依赖，venv 已存在，直接重启
+  #         ssh $SERVER_USER@$SERVER_HOST "cd /data/python-app && docker-compose restart python-app || true"
