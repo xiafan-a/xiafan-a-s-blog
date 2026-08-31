@@ -45,6 +45,7 @@ logs/
 application-dev.properties
 application-local.properties
 application-*.yml
+application*.yaml
 !application-example.yml
 !application-example.properties
 
