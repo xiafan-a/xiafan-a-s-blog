@@ -30,6 +30,7 @@ import io.agentscope.core.message.Msg;
 import io.agentscope.core.message.TextBlock;
 import io.agentscope.core.message.ToolResultState;
 import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.model.Model;
 import io.agentscope.core.tool.Toolkit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -42,6 +43,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -71,11 +73,11 @@ public class AgentService {
             """;
 
     private final AppProperties props;
-    private final OpenAiCompatibleModel model;
+    private final Model model;
     private final ToolRegistryService registry;
     private final ObjectMapper om;
 
-    public AgentService(AppProperties props, OpenAiCompatibleModel model, ToolRegistryService registry,
+    public AgentService(AppProperties props, Model model, ToolRegistryService registry,
                         ObjectMapper om) {
         this.props = props;
         this.model = model;
@@ -121,7 +123,9 @@ public class AgentService {
         return agent.streamEvents(messages, ctx)
                 .concatMap(ev -> {
                     List<Map<String, Object>> chunks = state.handle(ev);
-                    return chunks.isEmpty() ? Flux.empty() : Flux.fromIterable(chunks);
+                    return chunks.isEmpty()
+                            ? Flux.empty()
+                            : Flux.fromIterable(chunks.stream().filter(Objects::nonNull).toList());
                 })
                 .onErrorResume(err -> {
                     log.error("agent stream error", err);
@@ -269,6 +273,7 @@ public class AgentService {
         private int step;
 
         private boolean errored;
+        private boolean sawResult;
 
         StreamState(String sessionId, boolean enableThought, ObjectMapper om) {
             this.sessionId = sessionId;
@@ -292,7 +297,7 @@ public class AgentService {
             } else if (ev instanceof TextBlockEndEvent || ev instanceof ThinkingBlockEndEvent) {
                 textOpen = false;
             } else if (ev instanceof ToolCallStartEvent tcs) {
-                chunks.add(flushThought());
+                addIfNotNull(chunks, flushThought());
                 actionCallId = tcs.getToolCallId();
                 actionName = tcs.getToolCallName();
                 actionParams.setLength(0);
@@ -319,11 +324,18 @@ public class AgentService {
             } else if (ev instanceof ToolResultEndEvent tre) {
                 chunks.add(emitObservation(tre));
             } else if (ev instanceof AgentResultEvent are) {
-                chunks.add(emitText(are));
+                sawResult = true;
+                addIfNotNull(chunks, emitText(are));
             } else if (ev instanceof ExceedMaxItersEvent) {
                 // max iterations reached; final result (if any) arrives via AgentResultEvent
             }
             return chunks;
+        }
+
+        private static void addIfNotNull(List<Map<String, Object>> chunks, Map<String, Object> chunk) {
+            if (chunk != null) {
+                chunks.add(chunk);
+            }
         }
 
         private Map<String, Object> flushThought() {
@@ -435,6 +447,10 @@ public class AgentService {
             List<Map<String, Object>> out = new ArrayList<>();
             if (errored) {
                 return out;
+            }
+            if (!sawResult) {
+                log.warn("Agent stream ended without a final result; reporting an error");
+                return error(new IllegalStateException("AgentScope stream ended before the final result"));
             }
             double totalTime = (System.nanoTime() - startNanos) / 1_000_000_000.0;
             Map<String, Object> summary = new LinkedHashMap<>();

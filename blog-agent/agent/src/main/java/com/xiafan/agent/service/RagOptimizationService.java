@@ -1,10 +1,15 @@
 package com.xiafan.agent.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.xiafan.agent.config.AppProperties;
 import com.xiafan.agent.service.llm.OpenAiClient;
+import io.agentscope.core.message.ContentBlock;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.model.Model;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -23,9 +28,11 @@ public class RagOptimizationService {
 
     private final OpenAiClient openAi;
     private final AppProperties props;
+    private final Model model;
 
-    public RagOptimizationService(OpenAiClient openAi, AppProperties props) {
+    public RagOptimizationService(OpenAiClient openAi, Model model, AppProperties props) {
         this.openAi = openAi;
+        this.model = model;
         this.props = props;
     }
 
@@ -64,9 +71,7 @@ public class RagOptimizationService {
         result.put("original_query", query);
         result.put("expanded_queries", List.of());
         try {
-            JsonNode completion = openAi.chatCompletion(
-                    props.getApi().getExtendModel(), List.of(Map.of("role", "user", "content", prompt)), 0.1, null, 60);
-            String content = OpenAiClient.contentFrom(completion);
+            String content = completeText(props.getApi().getExtendModel(), prompt, 0.1);
             if (content != null) {
                 String parsed = stripMarkdownFence(content.strip());
                 JsonNode json = openAi.parseTree(parsed);
@@ -146,9 +151,7 @@ public class RagOptimizationService {
                 请输出压缩后的内容，保留资料编号以便追溯。压缩后的内容总长度不要超过%d个字符。"""
                 .formatted(query, joined, maxLength);
         try {
-            JsonNode completion = openAi.chatCompletion(
-                    props.getApi().getExtendModel(), List.of(Map.of("role", "user", "content", prompt)), 0.1, null, 60);
-            String compressed = OpenAiClient.contentFrom(completion);
+            String compressed = completeText(props.getApi().getExtendModel(), prompt, 0.1);
             if (compressed == null || compressed.isBlank()) {
                 throw new RuntimeException("empty compressed result");
             }
@@ -212,9 +215,7 @@ public class RagOptimizationService {
         result.put("issues", List.of());
         result.put("confidence", 0.5);
         try {
-            JsonNode completion = openAi.chatCompletion(
-                    props.getApi().getResultModel(), List.of(Map.of("role", "user", "content", prompt)), 0.1, null, 60);
-            String content = OpenAiClient.contentFrom(completion);
+            String content = completeText(props.getApi().getResultModel(), prompt, 0.1);
             if (content != null) {
                 JsonNode json = openAi.parseTree(stripMarkdownFence(content.strip()));
                 result.put("is_reasonable", json.path("is_reasonable").asBoolean(true));
@@ -231,6 +232,32 @@ public class RagOptimizationService {
             log.warn("optimize_response failed, keeping original response: {}", e.getMessage());
         }
         return result;
+    }
+
+    private String completeText(String modelName, String prompt, double temperature) {
+        StringBuilder result = new StringBuilder();
+        GenerateOptions options = GenerateOptions.builder()
+                .modelName(modelName)
+                .temperature(temperature)
+                .stream(false)
+                .build();
+        model.stream(List.<Msg>of(new UserMessage(prompt)), List.of(), options)
+                .toStream()
+                .forEach(response -> result.append(responseText(response)));
+        return result.toString();
+    }
+
+    private static String responseText(ChatResponse response) {
+        if (response == null) {
+            return "";
+        }
+        StringBuilder content = new StringBuilder();
+        for (ContentBlock block : response.getContent()) {
+            if (block instanceof TextBlock textBlock) {
+                content.append(textBlock.getText());
+            }
+        }
+        return content.toString();
     }
 
     private String joinContexts(List<Map<String, Object>> contexts) {

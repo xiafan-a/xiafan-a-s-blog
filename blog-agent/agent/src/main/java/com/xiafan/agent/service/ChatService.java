@@ -1,11 +1,18 @@
 package com.xiafan.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiafan.agent.config.AppProperties;
 import com.xiafan.agent.entity.KnowledgeBase;
-import com.xiafan.agent.service.llm.OpenAiClient;
+import io.agentscope.core.message.AssistantMessage;
+import io.agentscope.core.message.ContentBlock;
+import io.agentscope.core.message.Msg;
+import io.agentscope.core.message.SystemMessage;
+import io.agentscope.core.message.TextBlock;
+import io.agentscope.core.message.UserMessage;
+import io.agentscope.core.model.ChatResponse;
+import io.agentscope.core.model.GenerateOptions;
+import io.agentscope.core.model.Model;
 import org.springframework.stereotype.Service;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.SynchronousSink;
@@ -20,7 +27,7 @@ import java.util.Map;
 public class ChatService {
 
     private final AppProperties props;
-    private final OpenAiClient openAi;
+    private final Model model;
     private final ObjectMapper om;
     private final RagOptimizationService ragOptimization;
     private final KnowledgeChunkService chunkService;
@@ -28,12 +35,12 @@ public class ChatService {
     private final ConversationMessageService messageService;
     private final EmbeddingService embeddingService;
 
-    public ChatService(AppProperties props, OpenAiClient openAi, ObjectMapper om,
+    public ChatService(AppProperties props, Model model, ObjectMapper om,
                        RagOptimizationService ragOptimization, KnowledgeChunkService chunkService,
                        KnowledgeBaseService knowledgeBaseService, ConversationMessageService messageService,
                        EmbeddingService embeddingService) {
         this.props = props;
-        this.openAi = openAi;
+        this.model = model;
         this.om = om;
         this.ragOptimization = ragOptimization;
         this.chunkService = chunkService;
@@ -124,36 +131,24 @@ public class ChatService {
         }
     }
 
-    private Flux<Map<String, Object>> streamWithAssistant(List<Map<String, Object>> messages, String model,
+    private Flux<Map<String, Object>> streamWithAssistant(List<Map<String, Object>> messages, String modelName,
                                                           double temperature) {
-        return openAi.streamChat(model, messages, temperature, null)
-                .handle((JsonNode node, SynchronousSink<Map<String, Object>> sink) -> emitFromChoices(node, sink))
+        return model.stream(toAgentScopeMessages(messages), List.of(), chatOptions(modelName, temperature))
+                .handle((ChatResponse response, SynchronousSink<Map<String, Object>> sink) ->
+                        emitFromResponse(response, sink))
                 .takeUntil(chunk -> Boolean.TRUE.equals(chunk.get("done")))
                 .onErrorResume(e -> Flux.just(chatChunk("error", "错误: " + e.getMessage(), "assistant", null, true)));
     }
 
-    private Flux<Map<String, Object>> directRagStream(String model, double temperature, String query,
+    private Flux<Map<String, Object>> directRagStream(String modelName, double temperature, String query,
                                                       int knowledgeBaseId, Integer sessionId,
                                                       List<Map<String, Object>> msgList,
                                                       List<Map<String, Object>> allContexts) {
         StringBuilder finalResponse = new StringBuilder();
-        return openAi.streamChat(model, msgList, temperature, null)
-                .handle((JsonNode node, SynchronousSink<Map<String, Object>> sink) -> {
-                    JsonNode choices = node.path("choices");
-                    if (!choices.isArray() || choices.isEmpty()) {
-                        return;
-                    }
-                    JsonNode choice = choices.get(0);
-                    JsonNode delta = choice.path("delta");
-                    String content = delta.path("content").asText(null);
-                    if (content != null && !content.isEmpty()) {
-                        finalResponse.append(content);
-                        sink.next(chatChunk(node.path("id").asText(null), content, "assistant", null, false));
-                    }
-                    String finish = choice.path("finish_reason").asText(null);
-                    if (finish != null && !finish.isEmpty()) {
-                        sink.next(chatChunk(node.path("id").asText(null), "", "assistant", finish, true));
-                    }
+        return model.stream(toAgentScopeMessages(msgList), List.of(), chatOptions(modelName, temperature))
+                .handle((ChatResponse response, SynchronousSink<Map<String, Object>> sink) -> {
+                    finalResponse.append(responseText(response));
+                    emitFromResponse(response, sink);
                 })
                 .takeUntil(chunk -> Boolean.TRUE.equals(chunk.get("done")))
                 .doOnComplete(() -> saveRagMessages(knowledgeBaseId, sessionId, query, finalResponse.toString(), allContexts))
@@ -165,12 +160,7 @@ public class ChatService {
                                                               List<Map<String, Object>> allContexts,
                                                               double temperature) {
         try {
-            JsonNode completion = openAi.chatCompletion(props.getApi().getPreModel(), msgList,
-                    temperature, null, 300);
-            String initialResponse = OpenAiClient.contentFrom(completion);
-            if (initialResponse == null) {
-                initialResponse = "";
-            }
+            String initialResponse = completeText(msgList, props.getApi().getPreModel(), temperature);
             String finalResponse = initialResponse;
             try {
                 Map<String, Object> optimization = ragOptimization.optimizeResponse(query, allContexts, initialResponse);
@@ -194,21 +184,68 @@ public class ChatService {
         }
     }
 
-    private void emitFromChoices(JsonNode node, SynchronousSink<Map<String, Object>> sink) {
-        JsonNode choices = node.path("choices");
-        if (!choices.isArray() || choices.isEmpty()) {
-            return;
+    private void emitFromResponse(ChatResponse response, SynchronousSink<Map<String, Object>> sink) {
+        String content = responseText(response);
+        if (!content.isEmpty()) {
+            sink.next(chatChunk(response.getId(), content, "assistant", null, false));
         }
-        JsonNode choice = choices.get(0);
-        JsonNode delta = choice.path("delta");
-        String content = delta.path("content").asText(null);
-        if (content != null && !content.isEmpty()) {
-            sink.next(chatChunk(node.path("id").asText(null), content, "assistant", null, false));
-        }
-        String finish = choice.path("finish_reason").asText(null);
+        String finish = response.getFinishReason();
         if (finish != null && !finish.isEmpty()) {
-            sink.next(chatChunk(node.path("id").asText(null), "", "assistant", finish, true));
+            sink.next(chatChunk(response.getId(), "", "assistant", finish, true));
         }
+    }
+
+    private String completeText(List<Map<String, Object>> messages, String modelName, double temperature) {
+        StringBuilder result = new StringBuilder();
+        GenerateOptions options = GenerateOptions.builder()
+                .modelName(modelName)
+                .temperature(temperature)
+                .stream(false)
+                .build();
+        model.stream(toAgentScopeMessages(messages), List.of(), options)
+                .toStream()
+                .forEach(response -> result.append(responseText(response)));
+        return result.toString();
+    }
+
+    private GenerateOptions chatOptions(String modelName, double temperature) {
+        return GenerateOptions.builder()
+                .modelName(modelName)
+                .temperature(temperature)
+                .build();
+    }
+
+    private List<Msg> toAgentScopeMessages(List<Map<String, Object>> messages) {
+        List<Msg> out = new ArrayList<>();
+        if (messages != null) {
+            for (Map<String, Object> message : messages) {
+                if (message == null) {
+                    continue;
+                }
+                String role = message.get("role") == null ? "user" : message.get("role").toString();
+                Object value = message.get("content");
+                String content = value == null ? "" : String.valueOf(value);
+                switch (role.toLowerCase()) {
+                    case "system" -> out.add(new SystemMessage(content));
+                    case "assistant" -> out.add(new AssistantMessage(content));
+                    default -> out.add(new UserMessage(content));
+                }
+            }
+        }
+        return out;
+    }
+
+    private static String responseText(ChatResponse response) {
+        if (response == null) {
+            return "";
+        }
+        StringBuilder content = new StringBuilder();
+        for (ContentBlock block : response.getContent()) {
+            if (block instanceof TextBlock textBlock) {
+                content.append(textBlock.getText());
+            }
+        }
+        return content.toString();
     }
 
     private void saveRagMessages(int knowledgeBaseId, Integer sessionId, String query, String response,

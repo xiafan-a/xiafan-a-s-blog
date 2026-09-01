@@ -1,88 +1,69 @@
 package com.xiafan.agent.repository;
 
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.xiafan.agent.entity.ConversationSession;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.stereotype.Repository;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
-import javax.sql.DataSource;
-import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class ConversationSessionRepository extends BaseRepository {
+public interface ConversationSessionRepository extends BaseMapper<ConversationSession> {
 
-    public ConversationSessionRepository(DataSource dataSource) {
-        super(dataSource);
+    default ConversationSession insert(int knowledgeBaseId, String title) {
+        ConversationSession session = new ConversationSession();
+        session.setKnowledgeBaseId(knowledgeBaseId);
+        session.setTitle(title);
+        insert(session);
+        return findById(session.getId()).orElseThrow();
     }
 
-    public static final RowMapper<ConversationSession> ROW_MAPPER = (rs, rowNum) -> {
-        ConversationSession s = new ConversationSession();
-        s.setId(rs.getInt("id"));
-        s.setKnowledgeBaseId(rs.getInt("knowledge_base_id"));
-        s.setTitle(rs.getString("title"));
-        s.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
-        s.setUpdatedAt(rs.getTimestamp("updated_at").toLocalDateTime());
-        s.setIsDeleted(rs.getInt("is_deleted"));
-        return s;
-    };
-
-    public ConversationSession insert(int knowledgeBaseId, String title) {
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbc.update(conn -> {
-            PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO conversation_session (knowledge_base_id, title, created_at, updated_at, is_deleted) "
-                            + "VALUES (?, ?, now(), now(), 0)",
-                    new String[]{"id"});
-            ps.setInt(1, knowledgeBaseId);
-            ps.setString(2, title);
-            return ps;
-        }, keyHolder);
-        return findById(keyHolder.getKey().intValue()).orElseThrow();
+    default Optional<ConversationSession> findById(int id) {
+        return Optional.ofNullable(selectOne(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getId, id)
+                .eq(ConversationSession::getIsDeleted, 0)));
     }
 
-    public Optional<ConversationSession> findById(int id) {
-        return jdbc.query("SELECT * FROM conversation_session WHERE id = ? AND is_deleted = 0", ROW_MAPPER, id)
-                .stream().findFirst();
+    default List<ConversationSession> findByKnowledgeBase(int kbId, int skip, int limit) {
+        return selectList(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getKnowledgeBaseId, kbId)
+                .eq(ConversationSession::getIsDeleted, 0)
+                .orderByDesc(ConversationSession::getUpdatedAt)
+                .last("LIMIT " + limit + " OFFSET " + skip));
     }
 
-    public List<ConversationSession> findByKnowledgeBase(int kbId, int skip, int limit) {
-        return jdbc.query(
-                "SELECT * FROM conversation_session WHERE knowledge_base_id = ? AND is_deleted = 0 "
-                        + "ORDER BY updated_at DESC LIMIT ? OFFSET ?",
-                ROW_MAPPER, kbId, limit, skip);
+    default List<ConversationSession> findByKnowledgeBase(int kbId) {
+        return selectList(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getKnowledgeBaseId, kbId)
+                .eq(ConversationSession::getIsDeleted, 0)
+                .orderByDesc(ConversationSession::getUpdatedAt));
     }
 
-    public List<ConversationSession> findByKnowledgeBase(int kbId) {
-        return jdbc.query(
-                "SELECT * FROM conversation_session WHERE knowledge_base_id = ? AND is_deleted = 0 ORDER BY updated_at DESC",
-                ROW_MAPPER, kbId);
+    default List<ConversationSession> findAllNotDeleted() {
+        return selectList(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getIsDeleted, 0)
+                .orderByDesc(ConversationSession::getUpdatedAt));
     }
 
-    public List<ConversationSession> findAllNotDeleted() {
-        return jdbc.query(
-                "SELECT * FROM conversation_session WHERE is_deleted = 0 ORDER BY updated_at DESC",
-                ROW_MAPPER);
+    default List<ConversationSession> findByNameContaining(String name) {
+        return selectList(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getIsDeleted, 0)
+                .like(ConversationSession::getTitle, name)
+                .orderByDesc(ConversationSession::getUpdatedAt));
     }
 
-    public List<ConversationSession> findByNameContaining(String name) {
-        return jdbc.query(
-                "SELECT * FROM conversation_session WHERE title LIKE ? AND is_deleted = 0 ORDER BY updated_at DESC",
-                ROW_MAPPER, "%" + name + "%");
-    }
+    @Update("""
+            UPDATE conversation_session
+            SET title = COALESCE(#{title,jdbcType=VARCHAR}, title), updated_at = now()
+            WHERE id = #{id} AND is_deleted = 0
+            """)
+    int update(@Param("id") int id, @Param("title") String title);
 
-    public int update(int id, String title) {
-        return jdbc.update(
-                "UPDATE conversation_session SET title = COALESCE(?, title), updated_at = now() "
-                        + "WHERE id = ? AND is_deleted = 0",
-                title, id);
-    }
-
-    public int softDelete(int id) {
-        return jdbc.update(
-                "UPDATE conversation_session SET is_deleted = 1, updated_at = now() WHERE id = ? AND is_deleted = 0",
-                id);
-    }
+    @Update("""
+            UPDATE conversation_session
+            SET is_deleted = 1, updated_at = now()
+            WHERE id = #{id} AND is_deleted = 0
+            """)
+    int softDelete(@Param("id") int id);
 }

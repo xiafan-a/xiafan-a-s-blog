@@ -8,9 +8,11 @@ import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 import org.springframework.context.annotation.Bean;
+import org.mybatis.spring.annotation.MapperScan;
 
 @SpringBootApplication
 @ConfigurationPropertiesScan
+@MapperScan("com.xiafan.agent.repository")
 public class AgentApplication {
 
     public static void main(String[] args) {

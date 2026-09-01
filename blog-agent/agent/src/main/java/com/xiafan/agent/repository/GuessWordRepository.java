@@ -1,82 +1,55 @@
 package com.xiafan.agent.repository;
 
-import com.fasterxml.jackson.core.type.TypeReference;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.xiafan.agent.entity.GuessWord;
-import org.springframework.jdbc.core.RowMapper;
-import org.springframework.jdbc.support.GeneratedKeyHolder;
-import org.springframework.jdbc.support.KeyHolder;
-import org.springframework.stereotype.Repository;
+import org.apache.ibatis.annotations.Param;
+import org.apache.ibatis.annotations.Update;
 
-import javax.sql.DataSource;
-import java.sql.PreparedStatement;
 import java.util.List;
 import java.util.Optional;
 
-@Repository
-public class GuessWordRepository extends BaseRepository {
+public interface GuessWordRepository extends BaseMapper<GuessWord> {
 
-    public GuessWordRepository(DataSource dataSource) {
-        super(dataSource);
+    default GuessWord insert(String word, String hint, int difficulty) {
+        GuessWord guessWord = new GuessWord();
+        guessWord.setWord(word);
+        guessWord.setHint(hint);
+        guessWord.setDifficulty(difficulty);
+        insert(guessWord);
+        return selectById(guessWord.getId());
     }
 
-    public static final RowMapper<GuessWord> ROW_MAPPER = (rs, rowNum) -> {
-        GuessWord w = new GuessWord();
-        w.setId(rs.getInt("id"));
-        w.setWord(rs.getString("word"));
-        w.setHint(rs.getString("hint"));
-        w.setDifficulty(rs.getInt("difficulty"));
-        w.setPassed(rs.getBoolean("is_passed"));
-        w.setPassCount(rs.getInt("pass_count"));
-        w.setCreatedAt(rs.getTimestamp("created_at").toLocalDateTime());
-        w.setEmbedding(fromJsonList(rs.getString("embedding"), new TypeReference<>() {
-        }));
-        return w;
-    };
-
-    public GuessWord insert(String word, String hint, int difficulty) {
-        KeyHolder keyHolder = new GeneratedKeyHolder();
-        jdbc.update(conn -> {
-            PreparedStatement ps = conn.prepareStatement(
-                    "INSERT INTO guess_words (word, hint, difficulty, is_passed, pass_count, created_at) "
-                            + "VALUES (?, ?, ?, FALSE, 0, now())",
-                    new String[]{"id"});
-            ps.setString(1, word);
-            ps.setString(2, hint);
-            ps.setInt(3, difficulty);
-            return ps;
-        }, keyHolder);
-        return findById(keyHolder.getKey().intValue()).orElseThrow();
+    default Optional<GuessWord> findById(int id) {
+        return Optional.ofNullable(selectOne(new LambdaQueryWrapper<GuessWord>()
+                .eq(GuessWord::getId, id)));
     }
 
-    public Optional<GuessWord> findById(int id) {
-        return jdbc.query("SELECT * FROM guess_words WHERE id = ?", ROW_MAPPER, id).stream().findFirst();
+    default List<GuessWord> findAll() {
+        return selectList(new LambdaQueryWrapper<GuessWord>()
+                .orderByDesc(GuessWord::getCreatedAt));
     }
 
-    public List<GuessWord> findAll() {
-        return jdbc.query(
-                "SELECT id, word, hint, difficulty, is_passed, pass_count, created_at, "
-                        + "CASE WHEN embedding IS NULL THEN NULL ELSE embedding END AS embedding "
-                        + "FROM guess_words ORDER BY created_at DESC",
-                ROW_MAPPER);
+    @Update("""
+            UPDATE guess_words
+            SET embedding = #{embedding,jdbcType=OTHER,typeHandler=com.xiafan.agent.repository.PostgresJsonTypeHandler}
+            WHERE id = #{id}
+            """)
+    int updateEmbedding(@Param("id") int id, @Param("embedding") List<Double> embedding);
+
+    @Update("""
+            UPDATE guess_words
+            SET is_passed = TRUE, pass_count = pass_count + 1
+            WHERE id = #{id}
+            """)
+    int markAsPassed(@Param("id") int id);
+
+    default int countAll() {
+        return Math.toIntExact(selectCount(new LambdaQueryWrapper<GuessWord>()));
     }
 
-    public int updateEmbedding(int id, List<Double> embedding) {
-        return jdbc.update("UPDATE guess_words SET embedding = ?::jsonb WHERE id = ?",
-                toJson(embedding), id);
-    }
-
-    public int markAsPassed(int id) {
-        return jdbc.update(
-                "UPDATE guess_words SET is_passed = TRUE, pass_count = pass_count + 1 WHERE id = ?", id);
-    }
-
-    public int countAll() {
-        Integer c = jdbc.queryForObject("SELECT COUNT(*) FROM guess_words", Integer.class);
-        return c == null ? 0 : c;
-    }
-
-    public int countPassed() {
-        Integer c = jdbc.queryForObject("SELECT COUNT(*) FROM guess_words WHERE is_passed = TRUE", Integer.class);
-        return c == null ? 0 : c;
+    default int countPassed() {
+        return Math.toIntExact(selectCount(new LambdaQueryWrapper<GuessWord>()
+                .eq(GuessWord::isPassed, true)));
     }
 }

@@ -9,8 +9,6 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.net.URI;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -47,10 +45,12 @@ public class BuiltinTools {
             List.of(".txt", ".md", ".json", ".csv", ".xml", ".html", ".js", ".css", ".py", ".java", ".c", ".cpp", ".h");
 
     private final KnowledgeChunkService chunkService;
+    private final McpWebSearchClient mcpWebSearch;
     private final HttpClient http;
 
-    public BuiltinTools(KnowledgeChunkService chunkService) {
+    public BuiltinTools(KnowledgeChunkService chunkService, McpWebSearchClient mcpWebSearch) {
         this.chunkService = chunkService;
+        this.mcpWebSearch = mcpWebSearch;
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
@@ -161,14 +161,13 @@ public class BuiltinTools {
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("query", query);
         try {
-            String encoded = URLEncoder.encode(query, StandardCharsets.UTF_8);
-            String html = fetch("https://html.duckduckgo.com/html/?q=" + encoded);
-            List<Map<String, Object>> results = parseDuckDuckGo(html, numResults);
+            List<Map<String, Object>> results = mcpWebSearch.search(query, numResults);
             result.put("results", results);
         } catch (Exception e) {
-            log.warn("web_search failed: {}", e.getMessage());
+            String message = e.getMessage() == null ? e.toString() : e.getMessage();
+            log.warn("web_search failed: {}", message);
             result.put("results", List.of());
-            result.put("error", e.getMessage());
+            result.put("error", message);
         }
         return result;
     }
@@ -381,52 +380,6 @@ public class BuiltinTools {
             throw new IOException("HTTP " + resp.statusCode() + " for " + url);
         }
         return resp.body();
-    }
-
-    private static List<Map<String, Object>> parseDuckDuckGo(String html, int limit) {
-        List<Map<String, Object>> results = new ArrayList<>();
-        List<String> hrefs = new ArrayList<>();
-        List<String> titles = new ArrayList<>();
-        List<String> snippets = new ArrayList<>();
-        Matcher a = Pattern.compile(
-                "<a[^>]*class=\"result__a\"[^>]*href=\"([^\"]*)\"[^>]*>(.*?)</a>", Pattern.DOTALL).matcher(html);
-        while (a.find()) {
-            hrefs.add(a.group(1));
-            titles.add(stripHtml(a.group(2)).trim());
-        }
-        Matcher s = Pattern.compile(
-                "<a[^>]*class=\"result__snippet\"[^>]*>(.*?)</a>", Pattern.DOTALL).matcher(html);
-        while (s.find()) {
-            snippets.add(stripHtml(s.group(1)).trim());
-        }
-        int n = Math.min(Math.min(hrefs.size(), titles.size()), limit);
-        for (int i = 0; i < n; i++) {
-            String url = expandDdg(hrefs.get(i));
-            String snippet = i < snippets.size() ? snippets.get(i) : "";
-            Map<String, Object> r = new LinkedHashMap<>();
-            r.put("title", titles.get(i));
-            r.put("url", url);
-            r.put("snippet", snippet);
-            results.add(r);
-        }
-        return results;
-    }
-
-    private static String expandDdg(String href) {
-        try {
-            if (href.contains("uddg=")) {
-                Matcher m = Pattern.compile("uddg=([^&]+)").matcher(href);
-                if (m.find()) {
-                    return URLDecoder.decode(m.group(1), StandardCharsets.UTF_8);
-                }
-            }
-            if (href.startsWith("//")) {
-                return "https:" + href;
-            }
-        } catch (Exception ignored) {
-            // fall through
-        }
-        return href;
     }
 
     private static String matchFirst(String text, String regex) {

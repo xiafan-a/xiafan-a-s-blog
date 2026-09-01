@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.UUID;
 
 
-@Component
+//@Component
 public class MInioChannel implements InitializingBean,FileUploadChannel {
     @Value(value = "${minio.bucket}")
     private String bucket;

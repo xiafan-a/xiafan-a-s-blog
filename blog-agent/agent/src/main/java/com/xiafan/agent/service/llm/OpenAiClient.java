@@ -115,7 +115,10 @@ public class OpenAiClient {
         HttpRequest request = postJsonRequest(url, body, Duration.ofSeconds(timeoutSeconds));
         try {
             return http.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        } catch (IOException | InterruptedException e) {
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
+            Thread.interrupted();
             throw new RuntimeException(e);
         }
     }
@@ -192,7 +195,7 @@ public class OpenAiClient {
             } catch (IOException e) {
                 sink.error(e);
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                Thread.interrupted();
                 sink.error(e);
             }
         });
@@ -221,7 +224,7 @@ public class OpenAiClient {
             return message.get("content").asText();
         }
         // streamed deltas
-        return message.path("content").asText(null);
+        return choices.get(0).path("delta").path("content").asText(null);
     }
 
     /** Extracts tool_calls from a chat completion response (OpenAI format), or empty list. */

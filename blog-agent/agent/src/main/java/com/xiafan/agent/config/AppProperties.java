@@ -3,6 +3,11 @@ package com.xiafan.agent.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
 /**
  * Application settings bound from environment variables (mirrors fastApiProject/config/settings.py).
  */
@@ -23,6 +28,7 @@ public class AppProperties {
     private final AgentConfig agent = new AgentConfig();
     private final ChatConfig chat = new ChatConfig();
     private final GuessConfig guess = new GuessConfig();
+    private final McpConfig mcp = new McpConfig();
 
     @Data
     public static class RagConfig {
@@ -47,6 +53,7 @@ public class AppProperties {
         private String extendModel = "qwen3.5-flash";
         private String resultModel = "";
         private double temperature = 0;
+        private int maxOutputTokens = 8192;
         private boolean useMock = true;
     }
 
@@ -101,5 +108,17 @@ public class AppProperties {
     public static class GuessConfig {
         private int listCacheTtl = 10800;
         private int similarityCacheTtl = 86400;
+    }
+
+    @Data
+    public static class McpConfig {
+        private int timeoutSeconds = 120;
+        private Map<String, McpServerConfig> servers = new LinkedHashMap<>();
+    }
+
+    @Data
+    public static class McpServerConfig {
+        private String command = "npx";
+        private List<String> args = new ArrayList<>(List.of("-y", "bing-cn-mcp"));
     }
 }

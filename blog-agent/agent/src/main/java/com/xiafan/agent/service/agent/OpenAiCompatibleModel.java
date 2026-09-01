@@ -74,6 +74,16 @@ public class OpenAiCompatibleModel implements Model {
                     }
                     extraBody.put("tools", toolList);
                 }
+                int maxTokens = options != null && options.getMaxTokens() != null
+                        ? options.getMaxTokens() : props.getApi().getMaxOutputTokens();
+                extraBody.put("max_tokens", maxTokens);
+                if (options != null && options.getAdditionalBodyParams() != null) {
+                    extraBody.putAll(options.getAdditionalBodyParams());
+                }
+                if (shouldStream(options, tools)) {
+                    return openAi.streamChat(modelName, openAiMessages, temperature, extraBody)
+                            .map(this::buildStreamResponse);
+                }
                 JsonNode completion = openAi.chatCompletion(modelName, openAiMessages, temperature, extraBody, 120);
                 return Flux.just(buildResponse(completion));
             } catch (Exception e) {
@@ -204,6 +214,44 @@ public class OpenAiCompatibleModel implements Model {
         ChatUsage usage = new ChatUsage(promptTokens, completionTokens, 0.0);
         String finishReason = completion.path("choices").path(0).path("finish_reason").asText(null);
         return new ChatResponse(id, blocks, usage, Map.of(), finishReason);
+    }
+
+    private static boolean shouldStream(GenerateOptions options, List<ToolSchema> tools) {
+        if (tools != null && !tools.isEmpty()) {
+            return false;
+        }
+        if (options != null && options.getStream() != null) {
+            return options.getStream();
+        }
+        return true;
+    }
+
+    private ChatResponse buildStreamResponse(JsonNode node) {
+        String id = node.path("id").asText(UUID.randomUUID().toString());
+        List<ContentBlock> blocks = new ArrayList<>();
+        String finishReason = null;
+        JsonNode choices = node.path("choices");
+        if (choices.isArray() && !choices.isEmpty()) {
+            JsonNode choice = choices.get(0);
+            String content = choice.path("delta").path("content").asText(null);
+            if (content != null && !content.isEmpty()) {
+                blocks.add(TextBlock.builder().text(content).build());
+            }
+            finishReason = choice.path("finish_reason").asText(null);
+        }
+        ChatUsage usage = usageFrom(node);
+        return new ChatResponse(id, blocks, usage, Map.of(), finishReason);
+    }
+
+    private static ChatUsage usageFrom(JsonNode node) {
+        JsonNode usage = node.path("usage");
+        if (!usage.isObject()) {
+            return ChatUsage.builder().build();
+        }
+        return ChatUsage.builder()
+                .inputTokens(usage.path("prompt_tokens").asInt(0))
+                .outputTokens(usage.path("completion_tokens").asInt(0))
+                .build();
     }
 
     @SuppressWarnings("unchecked")
