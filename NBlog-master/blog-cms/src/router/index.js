@@ -124,6 +124,21 @@ const routes = [
 		]
 	},
 	{
+		path: '/image',
+		name: 'Image',
+		redirect: '/image/list',
+		component: Layout,
+		meta: {title: '图片管理', icon: 'el-icon-picture-outline'},
+		children: [
+			{
+				path: 'list',
+				name: 'ImageList',
+				component: () => import('@/views/image/ImageList'),
+				meta: {title: '图片列表', icon: 'el-icon-picture'}
+			},
+		]
+	},
+	{
 		path: '/pictureHosting',
 		name: 'PictureHosting',
 		redirect: '/pictureHosting/setting',

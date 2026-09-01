@@ -15,11 +15,21 @@
 			</el-row>
 
 			<el-form-item label="文章描述" prop="description">
-				<mavon-editor v-model="form.description"/>
+				<mavon-editor v-model="form.description" :toolbars="toolbars" ref="editorDesc">
+					<template slot="left-toolbar-after">
+						<button type="button" class="editor-image-btn fa fa-mavon-picture-o"
+						        title="插入图片：从图片库选择或上传" @click="openImagePicker('editorDesc')"></button>
+					</template>
+				</mavon-editor>
 			</el-form-item>
 
 			<el-form-item label="文章正文" prop="content">
-				<mavon-editor v-model="form.content"/>
+				<mavon-editor v-model="form.content" :toolbars="toolbars" ref="editorContent">
+					<template slot="left-toolbar-after">
+						<button type="button" class="editor-image-btn fa fa-mavon-picture-o"
+						        title="插入图片：从图片库选择或上传" @click="openImagePicker('editorContent')"></button>
+					</template>
+				</mavon-editor>
 			</el-form-item>
 
 			<el-row :gutter="20">
@@ -99,22 +109,30 @@
 				<el-button type="primary" @click="submit">保存</el-button>
 			</span>
 		</el-dialog>
+
+		<!--图片选择/上传-->
+		<image-picker v-model="pickerVisible" @insert="insertImage"/>
 	</div>
 </template>
 
 <script>
 	import Breadcrumb from "@/components/Breadcrumb";
+	import ImagePicker from "@/components/ImagePicker";
+	import toolbars from "@/util/editorToolbars";
 	import {getCategoryAndTag, saveBlog, getBlogById, updateBlog} from '@/api/blog'
 
 	export default {
 		name: "WriteBlog",
-		components: {Breadcrumb},
+		components: {Breadcrumb, ImagePicker},
 		data() {
 			return {
 				categoryList: [],
 				tagList: [],
 				dialogVisible: false,
 				radio: 1,
+				toolbars: toolbars,
+				pickerVisible: false,
+				activeEditorRef: '',
 				form: {
 					title: '',
 					firstPicture: '',
@@ -209,11 +227,37 @@
 						return this.msgError('请填写必要的表单项')
 					}
 				})
+			},
+			openImagePicker(refName) {
+				this.activeEditorRef = refName
+				this.pickerVisible = true
+			},
+			insertImage(url, name) {
+				const editor = this.$refs[this.activeEditorRef]
+				if (editor) {
+					editor.insertText(editor.getTextareaDom(), {
+						prefix: '![',
+						str: `${name}](${url})`,
+						subfix: ''
+					})
+				}
 			}
 		}
 	}
 </script>
 
 <style scoped>
+	.editor-image-btn {
+		background: transparent;
+		border: none;
+		cursor: pointer;
+		padding: 0 4px;
+		font-size: 16px;
+		line-height: 1;
+		color: #606266;
+	}
 
+	.editor-image-btn:hover {
+		color: #409EFF;
+	}
 </style>
