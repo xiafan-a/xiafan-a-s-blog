@@ -4,7 +4,6 @@ import 'nprogress/nprogress.css'
 
 const request = axios.create({
 	baseURL: '/java/api',
-	// baseURL: 'http://localhost:8090/',
 	timeout: 10000,
 })
 

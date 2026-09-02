@@ -4,7 +4,7 @@ import 'nprogress/nprogress.css'
 import {Message} from 'element-ui'
 
 const request = axios.create({
-	baseURL: 'http://localhost:8088/api/v1/images',
+	baseURL: '/api/v1/images',
 	timeout: 30000 //上传图片可能需要更长的超时时间
 })
 
