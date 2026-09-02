@@ -63,7 +63,30 @@ jobs:
           path: blog-api/target/*.jar
           retention-days: 3
 
-  build-python:
+  build-agent:
+    name: Build Blog Agent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build with Maven
+        working-directory: ./blog-agent/agent
+        run: mvn clean package -DskipTests
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: blog-agent-jar
+          path: blog-agent/agent/target/*.jar
+          retention-days: 3
+
     name: Build Python Backend
     runs-on: ubuntu-latest
     steps:
@@ -79,7 +102,7 @@ jobs:
 
   deploy:
     name: Deploy to Server
-    needs: [build-frontend, build-java, build-python]
+    needs: [build-frontend, build-java, build-agent]
     runs-on: ubuntu-latest
     environment: host
     if: github.event_name == 'push'
@@ -122,21 +145,10 @@ jobs:
           scp -o StrictHostKeyChecking=no artifacts/java-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-api-0.0.1.jar
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-java"
 
-      - name: Deploy Python
+      - name: Deploy Agent
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
-            --exclude='.venv' \
-            --exclude='__pycache__' \
-            --exclude='*.pyc' \
-            --exclude='.git' \
-            --exclude='.idea' \
-            --exclude='venv' \
-            --exclude='.env' \
-            --exclude='.env.*' \
-            artifacts/python-code/ \
-            $SERVER_USER@$SERVER_HOST:/root/blog/backend/python/fastApiProject/
-          
-          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-python"
+          scp -o StrictHostKeyChecking=no artifacts/blog-agent-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-agent"
