@@ -87,18 +87,6 @@ jobs:
           path: blog-agent/agent/target/*.jar
           retention-days: 3
 
-    name: Build Python Backend
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-code
-          path: fastApiProject
-          retention-days: 3
 
   deploy:
     name: Deploy to Server
