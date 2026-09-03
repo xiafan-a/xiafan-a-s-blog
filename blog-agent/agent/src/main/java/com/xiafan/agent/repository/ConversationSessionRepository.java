@@ -40,8 +40,10 @@ public interface ConversationSessionRepository extends BaseMapper<ConversationSe
                 .orderByDesc(ConversationSession::getUpdatedAt));
     }
 
-    default List<ConversationSession> findAllNotDeleted() {
+    default List<ConversationSession> findStandalone() {
+        // 智能体独立会话：没有绑定知识库（knowledge_base_id = -1）
         return selectList(new LambdaQueryWrapper<ConversationSession>()
+                .eq(ConversationSession::getKnowledgeBaseId, -1)
                 .eq(ConversationSession::getIsDeleted, 0)
                 .orderByDesc(ConversationSession::getUpdatedAt));
     }

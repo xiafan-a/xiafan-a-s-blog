@@ -187,7 +187,7 @@ public class AgentController {
     @GetMapping("/sessions")
     public ApiResponse<List<ConversationSession>> getSessions(@RequestParam(defaultValue = "-1") int kbId) {
         List<ConversationSession> sessions = kbId <= 0
-                ? conversationSessionService.listAllSessions()
+                ? conversationSessionService.listStandaloneSessions()
                 : conversationSessionService.getSessionsByKnowledgeBase(kbId);
         return ApiResponse.ok(sessions);
     }

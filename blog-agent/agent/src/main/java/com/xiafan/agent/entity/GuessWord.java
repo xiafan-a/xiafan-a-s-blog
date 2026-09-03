@@ -27,7 +27,7 @@ public class GuessWord {
 
     @TableField("is_passed")
     @Getter(onMethod_ = @JsonProperty("is_passed"))
-    private boolean isPassed = false;
+    private boolean passed = false;
 
     @TableField("pass_count")
     private Integer passCount = 0;

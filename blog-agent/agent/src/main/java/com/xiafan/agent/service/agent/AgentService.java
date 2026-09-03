@@ -40,6 +40,7 @@ import reactor.core.publisher.Mono;
 
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -63,9 +64,11 @@ public class AgentService {
             %s
 
             请严格按照以下步骤工作：
-            1. Thought: 首先分析问题、拆解任务并规划下一步行动。
-            2. 需要使用工具时，调用下方提供的函数工具完成调用，等待工具执行结果后继续分析。
-            3. 当你已经收集到足够的信息，能够回答用户的最终问题时，直接给出最终答案。
+            1. Thought: 首先分析问题、拆解任务并规划下一步行动。判断解题需要哪些前提信息，以及它们之间的依赖关系。
+            2. 任何与当前日期、时间、年份相关的查询或计算，都必须先调用工具获取当前日期，确认日期后，再基于这个日期执行后续的查询与计算。
+               不要在工作前提信息（如当前日期）尚不明确时就发起依赖它的查询。
+            3. 需要使用工具时，调用下方提供的函数工具完成调用，等待工具执行结果后继续分析。
+            4. 当你已经收集到足够的信息，能够回答用户的最终问题时，直接给出最终答案。
 
             现在，请开始解决以下问题:
             Question: %s
@@ -262,9 +265,9 @@ public class AgentService {
         private String actionCallId;
         private String actionName;
         private final StringBuilder actionParams = new StringBuilder();
-        private long resultStartNanos;
-        private String resultName;
-        private final StringBuilder resultBuffer = new StringBuilder();
+        // 按工具调用 id 分别缓冲结果，避免同回合多工具并行执行时相互覆盖
+        private final Map<String, StringBuilder> resultBuffers = new HashMap<>();
+        private final Map<String, Long> resultStartNanos = new HashMap<>();
 
         private final Map<String, Integer> toolsUsed = new LinkedHashMap<>();
         private final List<Map<String, Object>> reactSteps = new ArrayList<>();
@@ -297,7 +300,7 @@ public class AgentService {
             } else if (ev instanceof TextBlockEndEvent || ev instanceof ThinkingBlockEndEvent) {
                 textOpen = false;
             } else if (ev instanceof ToolCallStartEvent tcs) {
-                addIfNotNull(chunks, flushThought());
+                addIfNotNull(chunks, flushThoughtOrFallback(tcs.getToolCallName()));
                 actionCallId = tcs.getToolCallId();
                 actionName = tcs.getToolCallName();
                 actionParams.setLength(0);
@@ -308,18 +311,19 @@ public class AgentService {
                 actionCallId = null;
                 actionName = null;
                 actionParams.setLength(0);
-            } else if (ev instanceof ToolResultStartEvent) {
-                resultStartNanos = System.nanoTime();
-                resultName = ((ToolResultStartEvent) ev).getToolCallName();
-                resultBuffer.setLength(0);
+            } else if (ev instanceof ToolResultStartEvent trs) {
+                resultStartNanos.put(trs.getToolCallId(), System.nanoTime());
+                resultBuffers.computeIfAbsent(trs.getToolCallId(), k -> new StringBuilder()).setLength(0);
             } else if (ev instanceof ToolResultTextDeltaEvent trt) {
-                resultBuffer.append(trt.getDelta());
+                resultBuffers.computeIfAbsent(trt.getToolCallId(), k -> new StringBuilder())
+                        .append(trt.getDelta());
             } else if (ev instanceof ToolResultDataDeltaEvent trd) {
                 ContentBlock data = trd.getData();
+                StringBuilder buf = resultBuffers.computeIfAbsent(trd.getToolCallId(), k -> new StringBuilder());
                 if (data instanceof TextBlock tb) {
-                    resultBuffer.append(tb.getText());
+                    buf.append(tb.getText());
                 } else {
-                    resultBuffer.append(data);
+                    buf.append(data);
                 }
             } else if (ev instanceof ToolResultEndEvent tre) {
                 chunks.add(emitObservation(tre));
@@ -353,6 +357,20 @@ public class AgentService {
             return chunk;
         }
 
+        private Map<String, Object> flushThoughtOrFallback(String toolName) {
+            Map<String, Object> thought = flushThought();
+            if (thought == null) {
+                // 本轮未产生思考文本（模型直接调用工具），补发占位思考，保证按“思考→行动→结果”顺序返回
+                thought = new LinkedHashMap<>();
+                thought.put("type", AgentResponseType.THOUGHT);
+                thought.put("content", "准备调用工具 " + toolName + " 以获取所需信息。");
+                thought.put("step", step);
+                thought.put("session_id", sessionId);
+                thought.put("partial", true);
+            }
+            return thought;
+        }
+
         private Map<String, Object> emitAction() {
             Map<String, Object> parameters;
             String raw = actionParams.toString();
@@ -382,10 +400,12 @@ public class AgentService {
 
         private Map<String, Object> emitObservation(ToolResultEndEvent tre) {
             boolean success = tre.getState() == ToolResultState.SUCCESS;
-            String resultText = resultBuffer.toString();
+            StringBuilder buf = resultBuffers.get(tre.getToolCallId());
+            String resultText = buf == null ? "" : buf.toString();
             Object value = success ? parseToJsonValue(resultText) : null;
             String error = success ? null : (resultText.isEmpty() ? tre.getState().name() : resultText);
-            double executionTime = (System.nanoTime() - resultStartNanos) / 1_000_000_000.0;
+            Long start = resultStartNanos.get(tre.getToolCallId());
+            double executionTime = start == null ? 0.0 : (System.nanoTime() - start) / 1_000_000_000.0;
 
             toolCount(tre.getToolCallName());
             Map<String, Object> row = new LinkedHashMap<>();

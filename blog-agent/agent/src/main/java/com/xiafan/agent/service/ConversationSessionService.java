@@ -33,8 +33,8 @@ public class ConversationSessionService {
         return repository.findByKnowledgeBase(kbId);
     }
 
-    public List<ConversationSession> listAllSessions() {
-        return repository.findAllNotDeleted();
+    public List<ConversationSession> listStandaloneSessions() {
+        return repository.findStandalone();
     }
 
     public List<ConversationSession> getSessionsByName(String name) {
