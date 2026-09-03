@@ -139,4 +139,5 @@ jobs:
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           scp -o StrictHostKeyChecking=no artifacts/blog-agent-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
-          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-agent"
+          scp -o StrictHostKeyChecking=no blog-agent/Dockerfile $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/Dockerfile
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "cd /root/blog && docker compose up -d --build blog-agent"
