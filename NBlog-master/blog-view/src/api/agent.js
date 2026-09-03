@@ -1,7 +1,7 @@
 import axios from 'axios'
 
 const CHAT_API_BASE = '/api/v1'
-// const CHAT_API_BASE = 'http://localhost:8100/api/v1'
+// const CHAT_API_BASE = 'http://localhost:8088/api/v1'
 
 // 创建会话
 export function createSession(data) {
@@ -75,20 +75,23 @@ export function agentChatStream(message, sessionId, conversationHistory, availab
 				buffer = lines.pop() || ''
 
 				for (const line of lines) {
-					if (line.trim()) {
-						try {
-							let jsonStr = line
-							if (line.startsWith('data: ')) {
-								jsonStr = line.substring(6)
-							}
-							const data = JSON.parse(jsonStr)
-							console.log('[agent.js SSE] Parsed data:', data)
-							if (onMessage) {
-								onMessage(data)
-							}
-						} catch (e) {
-							// 忽略解析错误
+					const trimmed = line.trim()
+					if (!trimmed) continue
+					// SSE 数据行：Spring 输出 data:{json}（无空格），或 data: {json}
+					let jsonStr = trimmed
+					if (trimmed.startsWith('data:')) {
+						jsonStr = trimmed.substring(5).trim()
+					}
+					// 兼容 OpenAI 风格的结束标记
+					if (jsonStr === '[DONE]') continue
+					try {
+						const data = JSON.parse(jsonStr)
+						console.log('[agent.js SSE] Parsed data:', data)
+						if (onMessage) {
+							onMessage(data)
 						}
+					} catch (e) {
+						// 忽略非 JSON 事件行（心跳/注释等）
 					}
 				}
 			}
