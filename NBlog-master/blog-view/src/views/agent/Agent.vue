@@ -90,40 +90,48 @@
 										<span class="m-dot"></span>
 									</span>
 								</div>
-								<!-- 步骤时间线 -->
-								<div class="m-step-timeline" v-if="message.steps && message.steps.length > 0">
-									<div v-for="(step, index) in message.steps" :key="step.id" class="m-step-item">
-										<!-- 左侧编号 -->
-										<div class="m-step-indicator">
-											<div class="m-step-circle">
-												<span class="m-step-number">{{ step.id }}</span>
-											</div>
-											<div class="m-step-line" v-if="index < message.steps.length - 1"></div>
+								<!-- 步骤：按思考分组折叠展示 -->
+								<div class="m-step-group-list" v-if="message.steps && message.steps.length > 0">
+									<div v-for="group in getStepGroups(message)" :key="group.key" class="m-step-group-item">
+										<!-- 折叠头部：默认折叠，展示思考摘要 / 调用工具 -->
+										<div class="m-step-group-head" @click="toggleGroup(message, group)">
+											<span class="m-step-group-chevron">{{ group.expanded ? '▼' : '▶' }}</span>
+											<span class="m-step-group-label">{{ groupSummary(group) }}</span>
 										</div>
-										<!-- 步骤卡片 -->
-										<div class="m-step-card" :class="`m-step-card-${step.type}`">
-											<!-- 步骤状态标签 -->
-											<div class="m-step-status">
-												<span class="m-step-status-text">{{ getStepStatus(step.type) }}</span>
+										<!-- 展开后的详细内容 -->
+										<div v-if="group.expanded" class="m-step-group-body">
+											<div v-if="group.thought" class="m-step-card m-step-card-thought">
+												<div class="m-step-status">
+													<span class="m-step-status-text">思考内容</span>
+												</div>
+												<div class="m-step-card-content">
+													<div class="m-step-type-label">思考内容</div>
+													<div class="m-step-detail" v-html="parseMarkdown(group.thought.content)"></div>
+												</div>
 											</div>
-											<!-- 步骤内容 -->
-											<div class="m-step-card-content">
-												<div class="m-step-type-label">{{ getStepLabel(step.type) }}</div>
-												<div class="m-step-detail" v-html="parseMarkdown(step.content)"></div>
-												<!-- 可展开的详细数据 -->
-												<div v-if="step.expandableData" class="m-expandable-container">
-													<div class="m-expandable-header" @click="toggleExpand(step)">
-														<span class="m-expandable-icon">{{ step._expanded ? '▼' : '▶' }}</span>
-														<span class="m-expandable-title">查看详情 ({{ step.expandableData.results ? step.expandableData.results.length + ' 条结果' : '数据' }})</span>
-													</div>
-													<div v-if="step._expanded" class="m-expandable-content">
-														<template v-if="step.expandableData.results">
-															<div v-for="(item, idx) in step.expandableData.results" :key="idx" class="m-result-item">
-																<div class="m-result-title"><a :href="item.url" target="_blank">{{ item.title }}</a></div>
-																<div class="m-result-snippet">{{ item.snippet }}</div>
-															</div>
-														</template>
-														<pre v-else>{{ JSON.stringify(step.expandableData, null, 2) }}</pre>
+											<div v-for="step in group.items" :key="step.id"
+												class="m-step-card" :class="`m-step-card-${step.type}`">
+												<div class="m-step-status">
+													<span class="m-step-status-text">{{ getStepStatus(step.type) }}</span>
+												</div>
+												<div class="m-step-card-content">
+													<div class="m-step-type-label">{{ getStepLabel(step.type) }}</div>
+													<div class="m-step-detail" v-html="parseMarkdown(step.content)"></div>
+													<!-- 可展开的详细数据 -->
+													<div v-if="step.expandableData" class="m-expandable-container">
+														<div class="m-expandable-header" @click="toggleExpand(step)">
+															<span class="m-expandable-icon">{{ step._expanded ? '▼' : '▶' }}</span>
+															<span class="m-expandable-title">查看详情 ({{ step.expandableData.results ? step.expandableData.results.length + ' 条结果' : '数据' }})</span>
+														</div>
+														<div v-if="step._expanded" class="m-expandable-content">
+															<template v-if="step.expandableData.results">
+																<div v-for="(item, idx) in step.expandableData.results" :key="idx" class="m-result-item">
+																	<div class="m-result-title"><a :href="item.url" target="_blank">{{ item.title }}</a></div>
+																	<div class="m-result-snippet">{{ item.snippet }}</div>
+																</div>
+															</template>
+															<pre v-else>{{ JSON.stringify(step.expandableData, null, 2) }}</pre>
+														</div>
 													</div>
 												</div>
 											</div>
@@ -418,7 +426,8 @@ export default {
 				isUser: false,
 				content: '',
 				steps: [],
-				done: false
+				done: false,
+				_expandedGroups: {}
 			};
 			this.messages.push(aiMessage);
 
@@ -494,6 +503,7 @@ export default {
 									aiMessage.steps.push({
 										id: aiMessage.steps.length + 1,
 										type: 'action',
+										toolName: data.tool_name,
 										content: actionContent
 									});
 								}
@@ -508,7 +518,8 @@ export default {
 									} else {
 										const result = data.result !== undefined ? data.result : data.content;
 										if (typeof result === 'object' && result !== null) {
-											obsContent = `[执行成功]\n结果: ${result.query || '[对象]'}`;
+											const summaryVal = result.query || result.date || result.title || result.content || result.text || '[对象]';
+											obsContent = `[执行成功]\n结果: ${summaryVal}`;
 											expandableData = result;
 										} else {
 											obsContent = `[执行成功]\n结果: ${result}`;
@@ -517,6 +528,7 @@ export default {
 									aiMessage.steps.push({
 										id: aiMessage.steps.length + 1,
 										type: 'observation',
+										toolName: data.tool_name,
 										content: obsContent,
 										expandableData: expandableData
 									});
@@ -536,14 +548,16 @@ export default {
 							case 'step_done':
 								break;
 							case 'summary':
-								if (data.content) {
-									aiMessage.steps = aiMessage.steps || [];
-									aiMessage.steps.push({
-										id: aiMessage.steps.length + 1,
-										type: 'summary',
-										content: data.content
-									});
+								if (data.summary || data.content) {
+									// 后端总结文字放在 summary 字段（旧格式曾在 content），作为最终回复内容追加
+									aiMessage.content = aiMessage.content
+										? aiMessage.content + '\n\n---\n' + (data.summary || data.content)
+										: (data.summary || data.content);
 								}
+								break;
+							case 'done':
+								aiMessage.done = true;
+								this.isGenerating = false;
 								break;
 							case 'text':
 								if (data.content) {
@@ -633,6 +647,70 @@ export default {
 		},
 		toggleExpand(step) {
 			this.$set(step, '_expanded', !step._expanded);
+		},
+		// 将步骤按“思考”分组：每次 thought 及其后的 action/observation 组成一个可折叠分组
+		getStepGroups(message) {
+			if (!message._expandedGroups) {
+				this.$set(message, '_expandedGroups', {});
+			}
+			const state = message._expandedGroups;
+			const groups = [];
+			let current = null;
+			for (const step of message.steps || []) {
+				if (step.type === 'thought') {
+					current = { key: 'thought-' + step.id, thought: step, items: [], tools: [] };
+					groups.push(current);
+				} else if (step.type === 'action') {
+					if (!current) {
+						current = { key: 'items-' + groups.length, thought: null, items: [], tools: [] };
+						groups.push(current);
+					}
+					current.items.push(step);
+					if (step.toolName) current.tools.push(step.toolName);
+				} else {
+					// observation：结果要归到调用同一工具的那个分组
+					let target = current;
+					if (step.toolName) {
+						for (let i = groups.length - 1; i >= 0; i--) {
+							if (groups[i].tools.includes(step.toolName)) {
+								target = groups[i];
+								break;
+							}
+						}
+					}
+					if (!target) {
+						target = { key: 'items-' + groups.length, thought: null, items: [], tools: [] };
+						groups.push(target);
+					}
+					target.items.push(step);
+					current = target;
+				}
+			}
+			for (const g of groups) {
+				g.expanded = !!state[g.key];
+			}
+			return groups;
+		},
+		// 折叠头摘要：思考首行 + 调用的工具名
+		groupSummary(group) {
+			const parts = [];
+			if (group.thought && group.thought.content) {
+				const oneLine = group.thought.content.split('\n')[0].trim();
+				parts.push(oneLine.length > 28 ? oneLine.slice(0, 28) + '…' : oneLine);
+			}
+			const tools = group.items
+				.filter(i => i.type === 'action')
+				.map(i => i.toolName)
+				.filter(Boolean);
+			if (tools.length) {
+				parts.push('调用工具：' + tools.join('、'));
+			}
+			if (!parts.length) parts.push('思考过程');
+			return parts.join(' · ');
+		},
+		toggleGroup(message, group) {
+			this.$set(message._expandedGroups, group.key, !group.expanded);
+			this.$forceUpdate();
 		},
 		formatDate(dateStr) {
 			if (!dateStr) return '';
@@ -782,6 +860,71 @@ export default {
 }
 
 /* 步骤时间线样式 */
+.m-step-group-list {
+	padding: 12px 0;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+
+.m-step-group-item {
+	border-radius: 12px;
+	border: 1px solid #e8ecf4;
+	background: #ffffff;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+	overflow: hidden;
+}
+
+.m-step-group-head {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 12px 16px;
+	cursor: pointer;
+	background: linear-gradient(135deg, #f8f9fa 0%, #eef1f6 100%);
+	user-select: none;
+	transition: background 0.2s ease;
+}
+
+.m-step-group-head:hover {
+	background: linear-gradient(135deg, #f1f3f8 0%, #e6eaf2 100%);
+}
+
+.m-step-group-chevron {
+	font-size: 12px;
+	color: #94a3b8;
+	width: 16px;
+	text-align: center;
+	flex-shrink: 0;
+}
+
+.m-step-group-label {
+	font-size: 13px;
+	color: #4a5568;
+	line-height: 1.5;
+	flex: 1;
+	word-break: break-word;
+}
+
+.m-step-group-body {
+	padding: 12px 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	border-top: 1px solid #eef1f6;
+	background: #fbfcfe;
+}
+
+.m-step-group-body .m-step-card {
+	box-shadow: none;
+	border-color: #e6e9f0;
+}
+
+.m-step-group-body .m-step-card:hover {
+	transform: none;
+	box-shadow: none;
+}
+
 .m-step-timeline {
 	padding: 12px 0;
 }
