@@ -91,8 +91,25 @@ export function deleteSession(sessionId) {
 	return axios.delete(`${CHAT_API_BASE}/sessions/${sessionId}`)
 }
 
+// 获取可用 skill 列表（blog-agent 转发 mcp-skill-service）
+export function getSkills() {
+	return axios.get(`${CHAT_API_BASE}/agent/skills`)
+}
+
+// 获取当前会话绑定的 skill
+export function getSessionSkill(sessionId) {
+	return axios.get(`${CHAT_API_BASE}/sessions/${sessionId}/skill`)
+}
+
+// 设置当前会话绑定的 skill 列表（多选；空数组表示清除绑定）
+export function setSessionSkills(sessionId, skills) {
+	return axios.put(`${CHAT_API_BASE}/sessions/${sessionId}/skill`, {
+		skills: skills || []
+	})
+}
+
 // 聊天流式响应 (for Qa.vue)
-export function chatStream(message, knowledgeBaseId, conversationHistory, onMessage) {
+export function chatStream(message, knowledgeBaseId, conversationHistory, onMessage, sessionId) {
 	return new Promise(async (resolve, reject) => {
 		try {
 			const identification = window.localStorage.getItem('identification')
@@ -108,7 +125,8 @@ export function chatStream(message, knowledgeBaseId, conversationHistory, onMess
 				body: JSON.stringify({
 					message: message,
 					knowledge_base_id: knowledgeBaseId,
-					conversation_history: conversationHistory
+					conversation_history: conversationHistory,
+					session_id: sessionId || null
 				})
 			})
 
