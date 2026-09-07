@@ -77,7 +77,7 @@ public class AppProperties {
         private boolean secure = false;
         private String bucket = "knowledge-base";
         private String imgBucket = "img";
-        private String publicUrl = "http://xiafana.asia:9000";
+        private String publicUrl = "https://xiafana.asia";
     }
 
     @Data
