@@ -64,6 +64,20 @@ public interface ConversationSessionRepository extends BaseMapper<ConversationSe
 
     @Update("""
             UPDATE conversation_session
+            SET skill = #{skill,jdbcType=VARCHAR}, updated_at = now()
+            WHERE id = #{id} AND is_deleted = 0
+            """)
+    int updateSkill(@Param("id") int id, @Param("skill") String skill);
+
+    @Update("""
+            UPDATE conversation_session
+            SET skills = #{skills,jdbcType=VARCHAR}, updated_at = now()
+            WHERE id = #{id} AND is_deleted = 0
+            """)
+    int updateSkills(@Param("id") int id, @Param("skills") String skills);
+
+    @Update("""
+            UPDATE conversation_session
             SET is_deleted = 1, updated_at = now()
             WHERE id = #{id} AND is_deleted = 0
             """)

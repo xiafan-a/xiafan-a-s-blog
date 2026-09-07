@@ -6,6 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiafan.agent.common.BusinessException;
 import com.xiafan.agent.config.AppProperties;
 import com.xiafan.agent.entity.agent.AgentResponseType;
+import com.xiafan.agent.entity.agent.ToolDefinition;
+import com.xiafan.agent.entity.agent.ToolParameter;
+import com.xiafan.agent.service.SessionSkillService;
 import io.agentscope.core.ReActAgent;
 import io.agentscope.core.agent.RuntimeContext;
 import io.agentscope.core.event.AgentEvent;
@@ -79,13 +82,15 @@ public class AgentService {
     private final Model model;
     private final ToolRegistryService registry;
     private final ObjectMapper om;
+    private final SessionSkillService sessionSkillService;
 
     public AgentService(AppProperties props, Model model, ToolRegistryService registry,
-                        ObjectMapper om) {
+                        ObjectMapper om, SessionSkillService sessionSkillService) {
         this.props = props;
         this.model = model;
         this.registry = registry;
         this.om = om;
+        this.sessionSkillService = sessionSkillService;
     }
 
     /**
@@ -111,7 +116,33 @@ public class AgentService {
         String sysPrompt = String.format(REACT_PROMPT_TEMPLATE, toolsDesc, userMessage,
                 historyText.isEmpty() ? "无" : historyText);
 
+        // 渐进式披露：系统提示词只放绑定的 skill 元数据（名称+描述），全文由模型按需调 load_skill 读取
+        List<String> boundSkills = sessionSkillService.resolveSkillNames(parseSessionId(sessionId));
+        List<Map<String, String>> skillMetadata = sessionSkillService.fetchSkillMetadata(boundSkills);
+        if (!boundSkills.isEmpty() && !skillMetadata.isEmpty()) {
+            sysPrompt = sysPrompt + "\n\n" + buildSkillMetadataBlock(skillMetadata);
+        } else if (!boundSkills.isEmpty()) {
+            // capability 服务不可用拿不到元数据时，降级为全文注入，保证 skill 约定不丢
+            log.debug("Skill metadata unavailable for {}; falling back to full-prompt injection", boundSkills);
+            StringBuilder injected = new StringBuilder();
+            for (String skill : boundSkills) {
+                String prompt = sessionSkillService.fetchSkillPrompt(skill, userMessage);
+                if (prompt != null && !prompt.isBlank()) {
+                    injected.append(prompt).append("\n\n---\n\n");
+                }
+            }
+            if (!injected.isEmpty()) {
+                sysPrompt = injected + sysPrompt;
+            }
+        }
+
         Toolkit toolkit = registry.buildToolkit(allowed);
+        if (!boundSkills.isEmpty() && !skillMetadata.isEmpty()) {
+            toolkit.registerAgentTool(new ExecutableAgentTool(
+                    loadSkillToolDefinition(boundSkills),
+                    loadSkillToolExecutor(boundSkills),
+                    om));
+        }
         ReActAgent agent = ReActAgent.builder()
                 .name("Assistant")
                 .sysPrompt(sysPrompt)
@@ -136,6 +167,85 @@ public class AgentService {
                 })
                 .concatWith(Flux.defer(() -> Flux.fromIterable(state.finishChunks())))
                 .doFinally(sig -> closeAgent(agent));
+    }
+
+    /**
+     * Agent session ids arrive as strings (the controller stringifies the request value); numeric
+     * values reference conversation_session rows, anything else (e.g. generated UUIDs) has no
+     * bound skill.
+     */
+    private static Integer parseSessionId(String sessionId) {
+        if (sessionId == null || sessionId.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(sessionId.trim());
+        } catch (NumberFormatException ignored) {
+            return null;
+        }
+    }
+
+    // ============================================ session skills ============================================
+
+    /**
+     * Compact prompt block listing the bound skills (name + description only, no instructions).
+     * The model loads the full requirements on demand via the {@code load_skill} tool.
+     */
+    private static String buildSkillMetadataBlock(List<Map<String, String>> skillMetadata) {
+        StringBuilder block = new StringBuilder("""
+                当前会话绑定了以下 Skills（此处仅列出名称与用途，不要臆测其具体要求）：
+                """);
+        for (Map<String, String> skill : skillMetadata) {
+            block.append("- ").append(skill.get("name"));
+            String description = skill.get("description");
+            if (description != null && !description.isBlank()) {
+                block.append(": ").append(description);
+            }
+            block.append('\n');
+        }
+        block.append("""
+                如果某个 Skill 与当前任务相关，先调用 load_skill 工具读取其完整要求，再严格按其要求执行；与任务无关的 Skill 不要加载。
+                """);
+        return block.toString();
+    }
+
+    /** Local {@code load_skill} tool definition; the enum constrains calls to the bound skills. */
+    private static ToolDefinition loadSkillToolDefinition(List<String> boundSkills) {
+        ToolDefinition definition = new ToolDefinition();
+        definition.setName("load_skill");
+        definition.setDisplayName("读取 Skill 要求");
+        definition.setDescription("读取当前会话绑定的某个 Skill 的完整要求。仅在系统提示词列出的 Skill 中选择。");
+        definition.setCategory("session");
+        definition.setEnabled(true);
+        definition.setBuiltIn(true);
+        ToolParameter parameter = new ToolParameter();
+        parameter.setName("skill_name");
+        parameter.setType("string");
+        parameter.setDescription("要读取的 Skill 名称");
+        parameter.setRequired(true);
+        parameter.setEnumValues(new ArrayList<>(boundSkills));
+        definition.setParameters(List.of(parameter));
+        return definition;
+    }
+
+    /** Local {@code load_skill} executor: fetches the full instructions from mcp-skill-service. */
+    private ToolExecutor loadSkillToolExecutor(List<String> boundSkills) {
+        return params -> {
+            Object raw = params.get("skill_name");
+            String name = raw == null ? "" : String.valueOf(raw).trim();
+            if (!boundSkills.contains(name)) {
+                throw new IllegalArgumentException(
+                        "Skill '" + name + "' 未绑定到当前会话，可用: " + String.join(", ", boundSkills));
+            }
+            String instructions = sessionSkillService.fetchSkillInstructions(name);
+            if (instructions == null || instructions.isBlank()) {
+                throw new IllegalStateException("无法读取 Skill '" + name + "' 的内容，请直接按默认方式继续任务");
+            }
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("skill", name);
+            result.put("instructions", instructions);
+            return result;
+        };
     }
 
     /**

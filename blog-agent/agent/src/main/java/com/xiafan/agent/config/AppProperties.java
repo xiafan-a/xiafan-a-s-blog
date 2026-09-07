@@ -3,10 +3,6 @@ package com.xiafan.agent.config;
 import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Application settings bound from environment variables (mirrors fastApiProject/config/settings.py).
@@ -28,7 +24,7 @@ public class AppProperties {
     private final AgentConfig agent = new AgentConfig();
     private final ChatConfig chat = new ChatConfig();
     private final GuessConfig guess = new GuessConfig();
-    private final McpConfig mcp = new McpConfig();
+    private final CapabilityServiceConfig capabilityService = new CapabilityServiceConfig();
 
     @Data
     public static class RagConfig {
@@ -42,6 +38,10 @@ public class AppProperties {
         private int rerankTopK = 10;
         private int compressionThreshold = 8000;
         private double querySelectionThreshold = 0.5;
+        /** 会话 skill 注入方式：distill=预模型提炼执行清单（默认）| inject=全文注入 | off=忽略 */
+        private String skillMode = "distill";
+        /** distill 模式下提炼出的执行清单最大字符数 */
+        private int skillDirectiveMaxChars = 500;
     }
 
     @Data
@@ -91,7 +91,7 @@ public class AppProperties {
 
     @Data
     public static class AgentConfig {
-        private String defaultTools = "web_search,web_browser,get_Date";
+        private String defaultTools = "web_search,get_Date,web_open,web_scrape,web_click,web_input,web_scroll";
         private int maxReactIterations = 5;
         private boolean reactThinkingEnabled = true;
         private boolean browserHeadless = true;
@@ -111,14 +111,9 @@ public class AppProperties {
     }
 
     @Data
-    public static class McpConfig {
-        private int timeoutSeconds = 120;
-        private Map<String, McpServerConfig> servers = new LinkedHashMap<>();
-    }
-
-    @Data
-    public static class McpServerConfig {
-        private String command = "npx";
-        private List<String> args = new ArrayList<>(List.of("-y", "bing-cn-mcp"));
+    public static class CapabilityServiceConfig {
+        private boolean enabled = true;
+        private String baseUrl = "http://localhost:8200";
+        private int timeoutSeconds = 30;
     }
 }

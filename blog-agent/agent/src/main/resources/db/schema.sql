@@ -63,10 +63,17 @@ CREATE TABLE IF NOT EXISTS conversation_session (
     id                SERIAL PRIMARY KEY,
     knowledge_base_id INTEGER NOT NULL REFERENCES knowledge_bases(id),
     title             VARCHAR(255),
+    skill             VARCHAR(128),
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     is_deleted        INTEGER DEFAULT 0
 );
+
+-- 存量库补列：会话绑定的 skill（可空；为空表示默认问答行为）
+ALTER TABLE conversation_session ADD COLUMN IF NOT EXISTS skill VARCHAR(128);
+
+-- 多选 skill（逗号分隔名称；可空；读取时回退旧 skill 列）
+ALTER TABLE conversation_session ADD COLUMN IF NOT EXISTS skills VARCHAR(1024);
 
 CREATE TABLE IF NOT EXISTS images (
     id            SERIAL PRIMARY KEY,

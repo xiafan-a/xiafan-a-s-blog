@@ -23,4 +23,5 @@ public class ToolDefinition {
     private int timeout = 60;
     private String createdAt;
     private String updatedAt;
+    private boolean builtIn = false;
 }

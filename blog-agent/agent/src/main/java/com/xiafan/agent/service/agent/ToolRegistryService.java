@@ -1,6 +1,5 @@
 package com.xiafan.agent.service.agent;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiafan.agent.config.AppProperties;
 import com.xiafan.agent.entity.agent.ToolCall;
@@ -14,177 +13,231 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
-import java.net.URI;
-import java.net.URLEncoder;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
-import java.time.Duration;
-import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Mirrors service/toolRegistryService.py + the in-memory registration in api/agent.py.
- * Holds built-in and custom tool definitions, builds per-request {@link Toolkit}s for the
- * ReAct agent, and executes tools directly for the /agent/tools endpoints.
+ * Remote-backed tool facade for blog-agent. Definitions, persistence, execution, and audit
+ * records now live in mcp-skill-service; this registry only caches tool metadata so AgentScope
+ * can expose the same tools to the model and forward each call over HTTP.
  */
 @Service
 public class ToolRegistryService {
 
     private static final Logger log = LoggerFactory.getLogger(ToolRegistryService.class);
-    private static final List<String> BUILT_IN_TOOLS = List.of("file_read", "file_write", "web_search");
 
     private record ToolEntry(ToolDefinition definition, ToolExecutor executor) {
     }
 
     private final Map<String, ToolEntry> tools = new LinkedHashMap<>();
-    private final BuiltinTools builtinTools;
+    private final CapabilityServiceClient capability;
     private final AppProperties props;
     private final ObjectMapper om;
-    private final HttpClient http;
+    private boolean loadAttempted;
 
-    public ToolRegistryService(BuiltinTools builtinTools, AppProperties props, ObjectMapper om) {
-        this.builtinTools = builtinTools;
+    public ToolRegistryService(CapabilityServiceClient capability, AppProperties props, ObjectMapper om) {
+        this.capability = capability;
         this.props = props;
         this.om = om;
-        this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     }
 
     @PostConstruct
-    public void registerBuiltins() {
-        for (BuiltinTools.Spec spec : builtinTools.all()) {
-            tools.put(spec.definition().getName(), new ToolEntry(spec.definition(), spec.executor()));
-        }
-        log.info("Built-in tools registered: {}", tools.keySet());
+    public synchronized void initialize() {
+        refresh();
     }
 
     // ============================================ registry API ============================================
 
-    /** Registers a custom API tool. Throws if the name already exists. */
-    public ToolDefinition registerCustom(ToolCreate request) {
-        if (tools.containsKey(request.getName())) {
-            throw new IllegalArgumentException("Tool '" + request.getName() + "' already exists");
+    public synchronized boolean refresh() {
+        if (!capability.isEnabled()) {
+            log.warn("Capability service is disabled; no tools will be exposed to the agent");
+            return false;
         }
-        ToolDefinition def = new ToolDefinition();
-        def.setName(request.getName());
-        def.setDisplayName(request.getDisplayName());
-        def.setDescription(request.getDescription());
-        def.setParameters(toParameters(request.getParameters()));
-        def.setCategory(request.getCategory());
-        def.setEnabled(request.isEnabled());
-        def.setTimeout(request.getTimeout());
-        def.setRequiresAuth(!"none".equals(request.getAuthType()) && request.getAuthType() != null);
-        def.setCreatedAt(LocalDateTime.now().toString());
-        def.setUpdatedAt(LocalDateTime.now().toString());
-        def.setId(tools.size() + 1);
-        ToolExecutor executor = params -> executeApiTool(request, params);
-        tools.put(def.getName(), new ToolEntry(def, executor));
-        log.info("Registered custom tool: {}", def.getName());
-        return def;
+        loadAttempted = true;
+        try {
+            List<Map<String, Object>> remote = capability.listTools();
+            Map<String, ToolEntry> loaded = new LinkedHashMap<>();
+            for (Map<String, Object> item : remote) {
+                ToolDefinition definition = definitionFrom(item);
+                if (definition.getName() == null || definition.getName().isBlank()) {
+                    continue;
+                }
+                loaded.put(definition.getName(), new ToolEntry(definition, remoteExecutor(definition)));
+            }
+            synchronized (tools) {
+                tools.clear();
+                tools.putAll(loaded);
+            }
+            log.info("Tool registry loaded {} tool(s) from mcp-skill-service", tools.size());
+            return !tools.isEmpty();
+        } catch (Exception e) {
+            log.warn("Unable to load tools from mcp-skill-service: {}",
+                    e.getMessage() == null ? e.toString() : e.getMessage());
+            loadAttempted = false;
+            return false;
+        }
     }
 
-    public boolean unregister(String name) {
-        return tools.remove(name) != null;
+    private void ensureLoaded() {
+        synchronized (tools) {
+            if (tools.isEmpty() && !loadAttempted) {
+                refresh();
+            }
+        }
     }
 
-    public boolean isBuiltIn(String name) {
-        return BUILT_IN_TOOLS.contains(name);
+    /** Registers a custom API tool in the centralized service. Throws if the name already exists. */
+    public synchronized ToolDefinition registerCustom(ToolCreate request) {
+        ensureLoaded();
+        if (request == null || request.getName() == null || request.getName().isBlank()) {
+            throw new IllegalArgumentException("Tool name must not be blank");
+        }
+        String name = request.getName().trim();
+        if (tools.containsKey(name)) {
+            throw new IllegalArgumentException("Tool '" + name + "' already exists");
+        }
+        try {
+            Map<String, Object> response = capability.registerTool(request);
+            Map<String, Object> remote = asMap(response.get("tool"));
+            ToolDefinition definition = definitionFrom(remote == null ? capability.getTool(name) : remote);
+            synchronized (tools) {
+                tools.put(name, new ToolEntry(definition, remoteExecutor(definition)));
+            }
+            return definition;
+        } catch (CapabilityServiceException e) {
+            throw new IllegalArgumentException(e.getMessage() == null ? e.toString() : e.getMessage());
+        }
     }
 
-    public ToolDefinition getTool(String name) {
-        ToolEntry e = tools.get(name);
-        return e == null ? null : e.definition();
+    public synchronized boolean unregister(String name) {
+        ensureLoaded();
+        ToolEntry entry = tools.get(name);
+        if (entry == null || entry.definition().isBuiltIn()) {
+            return false;
+        }
+        try {
+            Map<String, Object> response = capability.unregisterTool(name);
+            tools.remove(name);
+            return Boolean.TRUE.equals(response.get("success"));
+        } catch (CapabilityServiceException e) {
+            if (e.getStatusCode() == 404) {
+                tools.remove(name);
+                return false;
+            }
+            throw e;
+        }
     }
 
-    public boolean contains(String name) {
+    public synchronized boolean contains(String name) {
+        ensureLoaded();
         return tools.containsKey(name);
     }
 
-    public List<ToolDefinition> listTools(String category, boolean enabledOnly) {
+    public synchronized boolean isBuiltIn(String name) {
+        ensureLoaded();
+        ToolEntry entry = tools.get(name);
+        return entry != null && entry.definition().isBuiltIn();
+    }
+
+    public synchronized ToolDefinition getTool(String name) {
+        ensureLoaded();
+        ToolEntry entry = tools.get(name);
+        return entry == null ? null : entry.definition();
+    }
+
+    public synchronized List<ToolDefinition> listTools(String category, boolean enabledOnly) {
+        ensureLoaded();
         List<ToolDefinition> result = new ArrayList<>();
-        for (ToolEntry e : tools.values()) {
-            ToolDefinition d = e.definition();
-            if (category != null && !category.isEmpty() && !category.equals(d.getCategory())) {
-                continue;
+        synchronized (tools) {
+            for (ToolEntry entry : tools.values()) {
+                ToolDefinition definition = entry.definition();
+                if (category != null && !category.isBlank() && !category.equals(definition.getCategory())) {
+                    continue;
+                }
+                if (enabledOnly && !definition.isEnabled()) {
+                    continue;
+                }
+                result.add(definition);
             }
-            if (enabledOnly && !d.isEnabled()) {
-                continue;
-            }
-            result.add(d);
         }
         return result;
     }
 
     public String[] defaultTools() {
+        ensureLoaded();
         String configured = props.getAgent().getDefaultTools();
-        if (configured != null && !configured.trim().isEmpty()) {
+        if (configured != null && !configured.isBlank()) {
             List<String> names = new ArrayList<>();
-            for (String t : configured.split(",")) {
-                String name = t.trim();
-                if (!name.isEmpty()) {
+            for (String raw : configured.split(",")) {
+                String name = raw.trim();
+                if (!name.isEmpty() && tools.containsKey(name)) {
                     names.add(name);
                 }
             }
-            return names.toArray(new String[0]);
+            if (!names.isEmpty()) {
+                return names.toArray(String[]::new);
+            }
         }
         return listTools("web", true).stream().map(ToolDefinition::getName).toArray(String[]::new);
     }
 
-    public Map<String, List<Map<String, Object>>> listCategories() {
+    public synchronized Map<String, List<Map<String, Object>>> listCategories() {
         Map<String, List<Map<String, Object>>> categories = new LinkedHashMap<>();
-        for (ToolDefinition t : listTools(null, false)) {
-            List<Map<String, Object>> bucket = categories.computeIfAbsent(t.getCategory(), k -> new ArrayList<>());
+        for (ToolDefinition definition : listTools(null, false)) {
+            List<Map<String, Object>> bucket = categories.computeIfAbsent(
+                    definition.getCategory(), key -> new ArrayList<>());
             Map<String, Object> entry = new LinkedHashMap<>();
-            entry.put("name", t.getName());
-            entry.put("display_name", t.getDisplayName());
-            entry.put("description", t.getDescription());
+            entry.put("name", definition.getName());
+            entry.put("display_name", definition.getDisplayName());
+            entry.put("description", definition.getDescription());
             bucket.add(entry);
         }
         return categories;
     }
 
-    /** Builds a fresh Toolkit containing only the allowed (and enabled) tools. */
-    public Toolkit buildToolkit(List<String> allowedToolNames) {
+    /** Builds a fresh AgentScope toolkit backed by remote executors. */
+    public synchronized Toolkit buildToolkit(List<String> allowedToolNames) {
+        ensureLoaded();
         Toolkit toolkit = new Toolkit();
-        for (ToolEntry e : tools.values()) {
-            ToolDefinition d = e.definition();
-            if (!d.isEnabled()) {
-                continue;
+        synchronized (tools) {
+            for (ToolEntry entry : tools.values()) {
+                ToolDefinition definition = entry.definition();
+                if (!definition.isEnabled()) {
+                    continue;
+                }
+                if (allowedToolNames != null && !allowedToolNames.isEmpty()
+                        && !allowedToolNames.contains(definition.getName())) {
+                    continue;
+                }
+                toolkit.registerAgentTool(new ExecutableAgentTool(definition, entry.executor(), om));
             }
-            if (allowedToolNames != null && !allowedToolNames.isEmpty() && !allowedToolNames.contains(d.getName())) {
-                continue;
-            }
-            toolkit.registerAgentTool(new ExecutableAgentTool(d, e.executor(), om));
         }
         return toolkit;
     }
 
-    /** Formats the available tools as prompt text (mirrors _format_tools_for_prompt). */
+    /** Formats available tools as prompt text. */
     public String formatToolsForPrompt(List<String> availableTools) {
-        List<ToolDefinition> defs = listTools(null, false);
+        List<ToolDefinition> definitions = listTools(null, false);
         if (availableTools != null && !availableTools.isEmpty()) {
-            defs = defs.stream().filter(t -> availableTools.contains(t.getName())).toList();
+            definitions = definitions.stream().filter(tool -> availableTools.contains(tool.getName())).toList();
         }
         List<String> lines = new ArrayList<>();
-        for (ToolDefinition t : defs) {
+        for (ToolDefinition definition : definitions) {
             List<String> params = new ArrayList<>();
-            for (ToolParameter p : t.getParameters()) {
-                params.add(p.getName() + "(" + p.getType() + ")");
+            for (ToolParameter parameter : definition.getParameters()) {
+                params.add(parameter.getName() + "(" + parameter.getType() + ")");
             }
-            lines.add("- " + t.getName() + ": " + t.getDescription() + ", 参数: " + String.join(", ", params));
+            lines.add("- " + definition.getName() + ": " + definition.getDescription()
+                    + ", parameters: " + String.join(", ", params));
         }
         return String.join("\n", lines);
     }
 
-    /** Direct execution (mirrors registry.execute) — returns the raw result via a {@link ToolResult}. */
-    public ToolResult execute(ToolCall call) {
-        long start = System.nanoTime();
-        ToolEntry e = tools.get(call.getToolName());
+    /** Direct execution by forwarding to the centralized service. */
+    public synchronized ToolResult execute(ToolCall call) {
+        ensureLoaded();
         ToolResult result = new ToolResult();
         result.setCallId(call.getCallId());
         result.setToolName(call.getToolName());
@@ -192,152 +245,94 @@ public class ToolRegistryService {
         result.setResult(null);
         result.setError(null);
         result.setExecutionTime(0);
-        if (e == null) {
+        if (!tools.containsKey(call.getToolName())) {
             result.setError("Tool '" + call.getToolName() + "' not found");
             return result;
         }
-        if (!e.definition().isEnabled()) {
-            result.setError("Tool '" + call.getToolName() + "' is disabled");
-            return result;
-        }
         try {
-            Map<String, Object> params = call.getParameters() == null ? Map.of() : call.getParameters();
-            Map<String, Object> validated = new ExecutableAgentTool(e.definition(), e.executor(), om)
-                    .validateAndFill(params);
-            Object value = e.executor().execute(validated);
-            result.setSuccess(true);
-            result.setResult(value);
-            result.setExecutionTime((System.nanoTime() - start) / 1_000_000_000.0);
-        } catch (Exception ex) {
-            result.setError(ex.getMessage() == null ? ex.toString() : ex.getMessage());
-            result.setExecutionTime((System.nanoTime() - start) / 1_000_000_000.0);
+            Map<String, Object> remote = capability.executeTool(call.getToolName(), call.getParameters());
+            result.setCallId(text(remote.get("call_id")));
+            result.setSuccess(Boolean.TRUE.equals(remote.get("success")));
+            result.setResult(remote.get("result"));
+            result.setError(text(remote.get("error")));
+            if (remote.get("execution_time") instanceof Number number) {
+                result.setExecutionTime(number.doubleValue());
+            }
+            if (!result.isSuccess() && (result.getError() == null || result.getError().isBlank())) {
+                result.setError("Remote tool execution failed");
+            }
+        } catch (CapabilityServiceException e) {
+            result.setError(e.getMessage() == null ? e.toString() : e.getMessage());
+        } catch (Exception e) {
+            result.setError(e.getMessage() == null ? e.toString() : e.getMessage());
         }
         return result;
     }
 
-    // ============================================ custom API executor ============================================
+    // ============================================ remote mapping ============================================
 
-    private Object executeApiTool(ToolCreate request, Map<String, Object> params) throws Exception {
-        Map<String, String> headers = new HashMap<>();
-        if (request.getApiHeaders() != null) {
-            for (Map.Entry<String, String> e : request.getApiHeaders().entrySet()) {
-                headers.put(e.getKey(), e.getValue());
+    private ToolExecutor remoteExecutor(ToolDefinition definition) {
+        return parameters -> {
+            Map<String, Object> remote = capability.executeTool(definition.getName(), parameters);
+            if (!Boolean.TRUE.equals(remote.get("success"))) {
+                String error = text(remote.get("error"));
+                throw new IllegalStateException(error == null || error.isBlank()
+                        ? "Remote tool execution failed" : error);
+            }
+            return remote.get("result");
+        };
+    }
+
+    private static ToolDefinition definitionFrom(Map<String, Object> remote) {
+        ToolDefinition definition = new ToolDefinition();
+        definition.setId(integer(remote.get("id")));
+        definition.setName(text(remote.get("name")));
+        definition.setDisplayName(text(remote.get("display_name")));
+        definition.setDescription(text(remote.get("description")));
+        definition.setCategory(text(remote.get("category")));
+        definition.setParameters(parameters(remote.get("parameters")));
+        definition.setEnabled(!Boolean.FALSE.equals(remote.get("enabled")));
+        definition.setRequiresAuth(Boolean.TRUE.equals(remote.get("requires_auth")));
+        definition.setTimeout(remote.get("timeout") instanceof Number number ? number.intValue() : 60);
+        definition.setCreatedAt(text(remote.get("created_at")));
+        definition.setUpdatedAt(text(remote.get("updated_at")));
+        definition.setBuiltIn(Boolean.TRUE.equals(remote.get("built_in")));
+        return definition;
+    }
+
+    private static List<ToolParameter> parameters(Object value) {
+        List<ToolParameter> result = new ArrayList<>();
+        if (!(value instanceof List<?> raw)) {
+            return result;
+        }
+        for (Object item : raw) {
+            if (item instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typed = (Map<String, Object>) map;
+                result.add(ToolParameter.fromMap(typed));
             }
         }
-        if ("bearer".equalsIgnoreCase(request.getAuthType()) && request.getAuthConfig() != null) {
-            Object token = request.getAuthConfig().get("token");
-            headers.put("Authorization", "Bearer " + (token == null ? "" : token));
-        } else if ("api_key".equalsIgnoreCase(request.getAuthType()) && request.getAuthConfig() != null) {
-            String keyName = request.getAuthConfig().get("key_name") == null
-                    ? "X-API-Key" : String.valueOf(request.getAuthConfig().get("key_name"));
-            Object apiKey = request.getAuthConfig().get("api_key");
-            headers.put(keyName, apiKey == null ? "" : String.valueOf(apiKey));
-        }
-        Duration timeout = Duration.ofSeconds(Math.max(1, request.getTimeout()));
-        UriHolder uri = buildUri(request.getApiUrl(), request.getApiMethod(), params);
-        HttpRequest.Builder builder = HttpRequest.newBuilder()
-                .uri(uri.uri)
-                .timeout(timeout)
-                .header("Content-Type", "application/json")
-                .header("Accept", "application/json,text/plain,*/*");
-        headers.forEach(builder::header);
-        HttpRequest httpRequest;
-        if ("GET".equalsIgnoreCase(request.getApiMethod())) {
-            httpRequest = builder.GET().build();
-        } else {
-            String body = om.writeValueAsString(params);
-            httpRequest = builder.method(request.getApiMethod().toUpperCase(),
-                    HttpRequest.BodyPublishers.ofString(body, StandardCharsets.UTF_8)).build();
-        }
-        HttpResponse<String> resp = http.send(httpRequest, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-        String body = resp.body();
-        Object parsed = parseBody(body);
-        if (request.getResponsePath() != null && !request.getResponsePath().isEmpty()) {
-            parsed = traverse(parsed, request.getResponsePath());
-        }
-        if (resp.statusCode() < 200 || resp.statusCode() >= 300) {
-            throw new RuntimeException("API returned HTTP " + resp.statusCode() + ": " + body);
-        }
-        return parsed;
+        return result;
     }
 
-    private record UriHolder(URI uri) {
+    private static Map<String, Object> asMap(Object value) {
+        return value instanceof Map<?, ?> map ? castMap(map) : null;
     }
 
-    private UriHolder buildUri(String apiUrl, String method, Map<String, Object> params) throws Exception {
-        if ("GET".equalsIgnoreCase(method) && params != null && !params.isEmpty()) {
-            StringBuilder sb = new StringBuilder(apiUrl);
-            char sep = apiUrl.contains("?") ? '&' : '?';
-            for (Map.Entry<String, Object> e : params.entrySet()) {
-                sb.append(sep).append(e.getKey()).append('=')
-                        .append(URLEncoder.encode(String.valueOf(e.getValue()), StandardCharsets.UTF_8));
-                sep = '&';
-            }
-            return new UriHolder(URI.create(sb.toString()));
-        }
-        return new UriHolder(URI.create(apiUrl));
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> castMap(Map<?, ?> map) {
+        return (Map<String, Object>) map;
     }
 
-    private Object parseBody(String body) {
-        if (body == null || body.isEmpty()) {
+    private static String text(Object value) {
+        if (value == null) {
             return null;
         }
-        try {
-            JsonNode node = om.readTree(body);
-            return om.convertValue(node, Object.class);
-        } catch (Exception e) {
-            String trimmed = body.trim();
-            if (trimmed.startsWith("\"")) {
-                try {
-                    return om.readValue(trimmed, String.class);
-                } catch (Exception ignored) {
-                    // fall through
-                }
-            }
-            return body;
-        }
+        String raw = String.valueOf(value);
+        return "null".equals(raw) ? null : raw;
     }
 
-    private static Object traverse(Object parsed, String path) {
-        Object current = parsed;
-        for (String key : path.split("\\.")) {
-            if (current instanceof Map<?, ?> map) {
-                current = map.get(key);
-                if (current == null) {
-                    break;
-                }
-            } else {
-                break;
-            }
-        }
-        return current;
-    }
-
-    private static List<ToolParameter> toParameters(List<Map<String, Object>> raw) {
-        List<ToolParameter> params = new ArrayList<>();
-        if (raw == null) {
-            return params;
-        }
-        for (Map<String, Object> m : raw) {
-            ToolParameter p = new ToolParameter();
-            p.setName(String.valueOf(m.getOrDefault("name", "")));
-            p.setType(String.valueOf(m.getOrDefault("type", "string")));
-            p.setDescription(String.valueOf(m.getOrDefault("description", "")));
-            p.setRequired(!Boolean.FALSE.equals(m.get("required")));
-            if (m.containsKey("default")) {
-                p.setDefaultValue(m.get("default"));
-            } else if (m.containsKey("default_value")) {
-                p.setDefaultValue(m.get("default_value"));
-            }
-            if (m.get("enum") instanceof List<?> enums) {
-                List<String> values = new ArrayList<>();
-                for (Object o : enums) {
-                    values.add(String.valueOf(o));
-                }
-                p.setEnumValues(values);
-            }
-            params.add(p);
-        }
-        return params;
+    private static Integer integer(Object value) {
+        return value instanceof Number number ? number.intValue() : null;
     }
 }
