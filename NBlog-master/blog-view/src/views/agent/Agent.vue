@@ -7,6 +7,15 @@
 				<div class="m-agent-header" ref="headerRef">
 					<span class="m-agent-title">{{ sessionName || '智能体' }}</span>
 					<div class="m-agent-actions">
+						<button
+							class="m-agent-btn m-agent-skill-btn"
+							:class="{ 'm-agent-skill-btn-active': activeSessionSkills.length > 0 }"
+							:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
+							:disabled="!activeSessionId || skillLoading"
+							@click="openSkillDialog"
+						>
+							<span>🧩</span>
+						</button>
 						<button class="m-agent-btn" @click="createNewSession" title="新建对话">
 							<span>+</span>
 						</button>
@@ -67,6 +76,10 @@
 				</div>
 				<!-- 对话内容 -->
 				<div class="m-deepseek-chat-area" ref="chatArea" @scroll="handleChatScroll">
+					<!-- Skill 操作通知 -->
+					<div class="m-skill-notification" v-if="skillNotification" :class="'m-skill-notification-' + skillNotification.type">
+						{{ skillNotification.title }}：{{ skillNotification.message }}
+					</div>
 					<div class="m-deepseek-message" v-for="(message, msgIndex) in messages" :key="msgIndex">
 						<div class="m-deepseek-message-content" :class="{user: message.isUser}">
 							<div class="m-deepseek-message-header" v-if="message.isUser">
@@ -74,6 +87,7 @@
 							</div>
 							<div class="m-deepseek-message-header" v-else>
 								<span>智能体</span>
+								<span class="m-deepseek-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</span>
 							</div>
 							<!-- 用户消息直接显示内容 -->
 							<div class="m-deepseek-message-body" v-if="message.isUser">
@@ -170,6 +184,40 @@
 			</div>
 		</div>
 
+		<!-- 选择会话 Skill 弹框 -->
+		<div class="m-delete-dialog-overlay" v-if="showSkillDialog" @click.self="cancelSkillDialog">
+			<div class="m-delete-dialog m-skill-dialog">
+				<div class="m-delete-dialog-header">
+					<span>选择当前会话使用的 Skill</span>
+				</div>
+				<div class="m-delete-dialog-body m-skill-dialog-body">
+					<div class="m-skill-list">
+						<div class="m-skill-item" :class="{active: tempSkills.length === 0}" @click="tempSkills = []">
+							<div class="m-skill-item-name">无（默认问答）</div>
+							<div class="m-skill-item-desc">不绑定任何 Skill，按智能体默认方式回答</div>
+						</div>
+						<div
+							class="m-skill-item"
+							v-for="skill in availableSkills"
+							:key="skill.name"
+							:class="{active: tempSkills.includes(skill.name)}"
+							@click="toggleTempSkill(skill.name)"
+						>
+							<div class="m-skill-item-name">{{ tempSkills.includes(skill.name) ? '☑' : '☐' }} {{ skill.name }}</div>
+							<div class="m-skill-item-desc">{{ skill.description || '暂无描述' }}</div>
+						</div>
+						<div class="m-skill-empty" v-if="availableSkills.length === 0">
+							暂无可用 Skill（mcp-skill-service 未启动或没有可用技能）
+						</div>
+					</div>
+				</div>
+				<div class="m-delete-dialog-footer">
+					<button class="m-delete-dialog-btn m-delete-dialog-btn-cancel" @click="cancelSkillDialog">取消</button>
+					<button class="m-delete-dialog-btn m-skill-confirm" @click="confirmSkillDialog" :disabled="skillLoading">确认</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- 删除确认对话框 -->
 		<div class="m-delete-dialog-overlay" v-if="showDeleteDialog" @click.self="cancelDelete">
 			<div class="m-delete-dialog">
@@ -190,7 +238,7 @@
 </template>
 
 <script>
-import { agentChatStream, createSession, updateSession, deleteSession, getAgentSessions, getSessionMessages, createMessage } from '@/api/agent';
+import { agentChatStream, createSession, updateSession, deleteSession, getAgentSessions, getSessionMessages, createMessage, getSkills, getSessionSkill, setSessionSkills } from '@/api/agent';
 import MarkdownIt from 'markdown-it';
 
 export default {
@@ -211,10 +259,23 @@ export default {
 			editingSessionId: null,
 			editingSessionName: '',
 			showDeleteDialog: false,
-			sessionToDelete: null
+			sessionToDelete: null,
+			// 会话 Skill 相关
+			availableSkills: [],
+			activeSessionSkills: [],
+			skillLoading: false,
+			showSkillDialog: false,
+			tempSkills: [],
+			skillNotification: null
 		}
 	},
 	computed: {
+		currentSkillDescription() {
+			const lines = this.availableSkills
+				.filter(s => this.activeSessionSkills.includes(s.name))
+				.map(s => s.name + (s.description ? '：' + s.description : ''));
+			return lines.join('\n');
+		},
 		filteredHistorySessions() {
 			if (!this.searchKeyword) {
 				return this.historySessions;
@@ -227,12 +288,101 @@ export default {
 	},
 	mounted() {
 		this.loadHistorySessions();
+		this.loadSkills();
 		document.addEventListener('click', this.handleClickOutside);
 	},
 	beforeDestroy() {
 		document.removeEventListener('click', this.handleClickOutside);
 	},
 	methods: {
+		// 加载可用 skill 列表（mcp-skill-service 经 blog-agent 转发）
+		async loadSkills() {
+			try {
+				const response = await getSkills();
+				if (!response || response.status < 200 || response.status >= 300) {
+					throw new Error('获取 skill 列表失败');
+				}
+				const data = response.data?.data || response.data;
+				const skills = data?.skills || [];
+				this.availableSkills = skills.map(s => ({
+					name: s.name,
+					description: s.description || ''
+				}));
+			} catch (error) {
+				// mcp-skill-service 不可用时不阻塞问答，仅不提供 skill 选项
+				this.availableSkills = [];
+			}
+		},
+		// 加载当前会话绑定的 skill 列表
+		async loadSessionSkill(sessionId) {
+			this.activeSessionSkills = [];
+			if (!sessionId) return;
+			try {
+				const response = await getSessionSkill(sessionId);
+				const data = response.data?.data || response.data;
+				this.activeSessionSkills = this.normalizeSkills(data?.skills || data?.skill);
+			} catch (error) {
+				this.activeSessionSkills = [];
+			}
+		},
+		// 兼容数组/单值/逗号分隔字符串三种形态
+		normalizeSkills(value) {
+			if (!value) return [];
+			if (Array.isArray(value)) return value.filter(v => v);
+			return String(value).split(',').map(s => s.trim()).filter(s => s);
+		},
+		// 弹窗内切换某个 skill 的选中状态
+		toggleTempSkill(name) {
+			const index = this.tempSkills.indexOf(name);
+			if (index >= 0) {
+				this.tempSkills.splice(index, 1);
+			} else {
+				this.tempSkills.push(name);
+			}
+		},
+		// 打开 Skill 选择弹框
+		openSkillDialog() {
+			if (!this.activeSessionId) return;
+			this.tempSkills = [...this.activeSessionSkills];
+			this.showSkillDialog = true;
+		},
+		// 取消选择
+		cancelSkillDialog() {
+			this.showSkillDialog = false;
+			this.tempSkills = [];
+		},
+		// 确认将所选 Skill 应用到当前会话
+		async confirmSkillDialog() {
+			const skills = [...this.tempSkills];
+			const sessionId = this.activeSessionId;
+			if (!sessionId) return;
+			this.skillLoading = true;
+			try {
+				const response = await setSessionSkills(sessionId, skills);
+				if (!response || response.status < 200 || response.status >= 300) {
+					throw new Error('设置 skill 失败');
+				}
+				this.activeSessionSkills = skills;
+				const session = this.historySessions.find(s => s.id === sessionId);
+				if (session) session.skills = [...skills];
+				this.showSkillDialog = false;
+				this.showSkillNotification('success', 'Skill 已更新',
+					skills.length ? `当前会话已应用 Skill：${skills.join('、')}` : '当前会话已恢复默认问答模式');
+			} catch (error) {
+				const msg = error.response?.data?.message || error.response?.data?.detail
+					|| error.response?.data?.title || error.message || '请稍后重试';
+				this.showSkillNotification('error', '设置 skill 失败', msg);
+			} finally {
+				this.skillLoading = false;
+			}
+		},
+		// 页面内通知（Agent 页没有 el-alert 容器，用轻量提示条）
+		showSkillNotification(type, title, message) {
+			this.skillNotification = { type, title, message };
+			setTimeout(() => {
+				this.skillNotification = null;
+			}, 3000);
+		},
 		handleClickOutside(event) {
 			if (!this.showHistoryDialog) return;
 
@@ -273,6 +423,7 @@ export default {
 			this.sessionName = '新会话';
 			this.messages = [];
 			this.inputMessage = '';
+			this.activeSessionSkills = [];
 		},
 		async loadHistorySessions() {
 			try {
@@ -325,6 +476,11 @@ export default {
 					this.messages = data.map(msg => ({
 						isUser: msg.role === 'user',
 						content: msg.content,
+						skills: this.normalizeSkills(
+							Array.isArray(msg.message_metadata?.skills)
+								? msg.message_metadata.skills
+								: (msg.message_metadata?.skill || msg.message_metadata?.Skill)
+						),
 						steps: msg.role === 'assistant' && msg.sources && msg.sources.length > 0
 							? msg.sources
 							: (msg.role === 'assistant' ? [] : undefined)
@@ -336,6 +492,7 @@ export default {
 				console.error('获取会话消息失败:', error);
 				this.messages = [];
 			}
+			this.loadSessionSkill(session.id);
 			this.$nextTick(() => this.scrollToBottom());
 		},
 		startEditSession(session) {
@@ -416,7 +573,8 @@ export default {
 					knowledge_base_id: -1,
 					role: 'user',
 					content: question,
-					session_id: this.activeSessionId
+					session_id: this.activeSessionId,
+					metadata: { skills: [...this.activeSessionSkills] }
 				}).catch(() => {});
 			}
 
@@ -596,7 +754,8 @@ export default {
 						role: 'assistant',
 						content: aiMessage.content,
 						sources: aiMessage.steps && aiMessage.steps.length > 0 ? aiMessage.steps : null,
-						session_id: this.activeSessionId
+						session_id: this.activeSessionId,
+						metadata: { skills: [...this.activeSessionSkills] }
 					}).catch(() => {});
 				}
 
@@ -743,6 +902,8 @@ export default {
 
 .m-deepseek-main {
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	background-color: #ffffff;
@@ -785,9 +946,126 @@ export default {
 	border-color: #d0d7de;
 }
 
+/* 会话 Skill 按钮 */
+.m-agent-skill-btn-active {
+	border-color: #2196f3;
+	color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.08);
+}
+
+.m-agent-skill-btn:disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* 消息上的 skill 徽标 */
+.m-deepseek-skill-tag {
+	margin-left: 8px;
+	font-size: 11px;
+	color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.08);
+	border: 1px solid rgba(33, 150, 243, 0.25);
+	border-radius: 10px;
+	padding: 1px 8px;
+}
+
+/* Skill 操作通知 */
+.m-skill-notification {
+	margin: 10px 20px 0;
+	padding: 8px 12px;
+	border-radius: 6px;
+	font-size: 13px;
+}
+
+.m-skill-notification-success {
+	background-color: #e8f5e9;
+	color: #2e7d32;
+	border: 1px solid #a5d6a7;
+}
+
+.m-skill-notification-error {
+	background-color: #ffebee;
+	color: #c62828;
+	border: 1px solid #ef9a9a;
+}
+
+/* Skill 选择弹框 */
+.m-skill-dialog {
+	width: 420px;
+}
+
+.m-skill-dialog-body {
+	padding-top: 12px;
+}
+
+.m-skill-list {
+	max-height: 320px;
+	overflow-y: auto;
+}
+
+.m-skill-item {
+	padding: 10px 12px;
+	border: 1px solid #e1e5e9;
+	border-radius: 6px;
+	margin-bottom: 8px;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.m-skill-item:hover {
+	border-color: #2196f3;
+	background-color: #f5faff;
+}
+
+.m-skill-item.active {
+	border-color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.08);
+}
+
+.m-skill-item-name {
+	font-size: 14px;
+	font-weight: 500;
+	color: #333;
+}
+
+.m-skill-item-desc {
+	font-size: 12px;
+	color: #888;
+	margin-top: 2px;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.m-skill-empty {
+	padding: 20px;
+	text-align: center;
+	color: #999;
+	font-size: 13px;
+}
+
+.m-skill-confirm {
+	background-color: #2196f3;
+	border: 1px solid #2196f3;
+	color: #ffffff;
+}
+
+.m-skill-confirm:hover {
+	background-color: #1976d2;
+	border-color: #1976d2;
+}
+
+.m-skill-confirm:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
 .m-deepseek-chat-area {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 	padding: 20px;
 }
 
@@ -797,6 +1075,7 @@ export default {
 
 .m-deepseek-message-content {
 	max-width: 80%;
+	min-width: 0;
 }
 
 .m-deepseek-message-content.user {
@@ -813,6 +1092,22 @@ export default {
 	padding: 12px 16px;
 	border-radius: 8px;
 	line-height: 1.5;
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+/* 宽内容限宽：代码块/表格在内部横向滚动，避免撑破布局 */
+.m-deepseek-message-body pre {
+	max-width: 100%;
+	box-sizing: border-box;
+	overflow-x: auto;
+}
+
+.m-deepseek-message-body table {
+	display: block;
+	max-width: 100%;
+	overflow-x: auto;
+	border-collapse: collapse;
 }
 
 .m-deepseek-message-content:not(.user) .m-deepseek-message-body {

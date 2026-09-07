@@ -54,6 +54,7 @@
 							</div>
 							<div class="m-deepseek-message-header" v-else>
 								<span>知识库</span>
+								<span class="m-deepseek-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</span>
 							</div>
 							<div class="m-deepseek-message-body" v-if="message.isUser || message.content">
 								<span v-html="message.isUser ? message.content : parseMarkdown(message.content)"></span>
@@ -72,6 +73,20 @@
 				
 				<!-- 输入框 -->
 				<div class="m-deepseek-input-area" v-if="activeSession">
+					<!-- 会话 Skill 按钮 -->
+					<div class="m-deepseek-skill-bar">
+						<button
+							class="m-deepseek-skill-btn"
+							:class="{ 'm-deepseek-skill-btn-active': activeSessionSkills.length > 0 }"
+							:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
+							:disabled="skillLoading"
+							@click="openSkillDialog"
+						>
+							<span class="m-deepseek-skill-btn-icon">🧩</span>
+							<span class="m-deepseek-skill-btn-text">{{ activeSessionSkills.length ? 'Skill ×' + activeSessionSkills.length : '选择 Skill' }}</span>
+							<span class="m-deepseek-skill-btn-arrow">▾</span>
+						</button>
+					</div>
 					<div class="m-deepseek-input-container">
 						<div class="m-deepseek-input-wrapper">
 							<textarea 
@@ -176,6 +191,37 @@
 			</div>
 		</div>
 		
+		<!-- 选择会话 Skill 弹框 -->
+		<div class="m-add-kb-form" v-if="showSkillDialog">
+			<div class="m-delete-confirm-overlay" @click="cancelSkillDialog"></div>
+			<div class="m-add-kb-form-content m-skill-dialog-content">
+				<h4>选择当前会话使用的 Skill</h4>
+				<div class="m-skill-list">
+					<div class="m-skill-item" :class="{active: tempSkills.length === 0}" @click="tempSkills = []">
+						<div class="m-skill-item-name">无（默认问答）</div>
+						<div class="m-skill-item-desc">不绑定任何 Skill，按知识库默认方式回答</div>
+					</div>
+					<div
+						class="m-skill-item"
+						v-for="skill in availableSkills"
+						:key="skill.name"
+						:class="{active: tempSkills.includes(skill.name)}"
+						@click="toggleTempSkill(skill.name)"
+					>
+						<div class="m-skill-item-name">{{ tempSkills.includes(skill.name) ? '☑' : '☐' }} {{ skill.name }}</div>
+						<div class="m-skill-item-desc">{{ skill.description || '暂无描述' }}</div>
+					</div>
+					<div class="m-skill-empty" v-if="availableSkills.length === 0">
+						暂无可用 Skill（mcp-skill-service 未启动或没有可用技能）
+					</div>
+				</div>
+				<div class="m-delete-confirm-actions">
+					<button class="m-delete-confirm-btn m-delete-confirm-cancel" @click="cancelSkillDialog">取消</button>
+					<button class="m-delete-confirm-btn m-skill-confirm" @click="confirmSkillDialog" :disabled="skillLoading">确认</button>
+				</div>
+			</div>
+		</div>
+
 		<!-- 上传文件对话框 -->
 		<div class="m-add-kb-form" v-if="showUploadDialog">
 			<div class="m-delete-confirm-overlay"></div>
@@ -296,7 +342,7 @@
 <script>
 import KnowledgeBaseItem from '@/components/qa/KnowledgeBaseItem.vue';
 import SessionItem from '@/components/qa/SessionItem.vue';
-import { chatStream, getKnowledgeBases, getKnowledgeBaseSessions, createKnowledgeBase, deleteKnowledgeBase, updateKnowledgeBase, createSession, updateSession, deleteSession, createMessage, getSessionMessages, uploadKnowledgeFile, getKnowledgeFiles, deleteKnowledgeFile } from '@/api/qa';
+import { chatStream, getKnowledgeBases, getKnowledgeBaseSessions, createKnowledgeBase, deleteKnowledgeBase, updateKnowledgeBase, createSession, updateSession, deleteSession, createMessage, getSessionMessages, uploadKnowledgeFile, getKnowledgeFiles, deleteKnowledgeFile, getSkills, getSessionSkill, setSessionSkills } from '@/api/qa';
 import MarkdownIt from 'markdown-it';
 import mk from '@iktakahiro/markdown-it-katex';
 import 'katex/dist/katex.min.css';
@@ -317,6 +363,12 @@ export default {
       }).use(mk),
       knowledgeBases: [],
       activeSession: null,
+      // 会话 Skill 相关
+      availableSkills: [],
+      activeSessionSkills: [],
+      skillLoading: false,
+      showSkillDialog: false,
+      tempSkills: [],
       messages: [],
       inputMessage: "",
       isGenerating: false,
@@ -368,11 +420,113 @@ export default {
       deleteFileName: ''
     }
   },
+  computed: {
+    currentSkillDescription() {
+      const lines = this.availableSkills
+        .filter(s => this.activeSessionSkills.includes(s.name))
+        .map(s => s.name + (s.description ? '：' + s.description : ''));
+      return lines.join('\n');
+    }
+  },
   mounted() {
+    // 页面加载时获取可用 skill 列表
+    this.loadSkills();
     // 页面加载时获取知识库信息
     this.loadKnowledgeBases();
   },
   methods: {
+    // 加载可用 skill 列表（mcp-skill-service 经 blog-agent 转发）
+    async loadSkills() {
+      try {
+        const response = await getSkills();
+        if (!response || response.status < 200 || response.status >= 300) {
+          throw new Error('获取 skill 列表失败');
+        }
+        const data = response.data?.data || response.data;
+        const skills = data?.skills || [];
+        this.availableSkills = skills.map(s => ({
+          name: s.name,
+          description: s.description || ''
+        }));
+      } catch (error) {
+        // mcp-skill-service 不可用时不阻塞问答，仅不提供 skill 选项
+        this.availableSkills = [];
+      }
+    },
+    // 加载当前会话绑定的 skill 列表
+    async loadSessionSkill(sessionId) {
+      this.activeSessionSkills = [];
+      if (!sessionId) return;
+      try {
+        const response = await getSessionSkill(sessionId);
+        const data = response.data?.data || response.data;
+        this.activeSessionSkills = this.normalizeSkills(data?.skills || data?.skill);
+      } catch (error) {
+        // 查询失败时回退到会话列表缓存的值
+        this.activeSessionSkills = this.cachedSessionSkills(sessionId);
+      }
+    },
+    // 从会话列表缓存中取 skill 列表
+    cachedSessionSkills(sessionId) {
+      for (let kb of this.knowledgeBases) {
+        const session = kb.sessions.find(s => s.id === sessionId);
+        if (session) return this.normalizeSkills(session.skills || session.skill);
+      }
+      return [];
+    },
+    // 兼容数组/单值/逗号分隔字符串三种形态
+    normalizeSkills(value) {
+      if (!value) return [];
+      if (Array.isArray(value)) return value.filter(v => v);
+      return String(value).split(',').map(s => s.trim()).filter(s => s);
+    },
+    // 弹窗内切换某个 skill 的选中状态
+    toggleTempSkill(name) {
+      const index = this.tempSkills.indexOf(name);
+      if (index >= 0) {
+        this.tempSkills.splice(index, 1);
+      } else {
+        this.tempSkills.push(name);
+      }
+    },
+    // 打开 Skill 选择弹框
+    openSkillDialog() {
+      if (!this.activeSession) return;
+      this.tempSkills = [...this.activeSessionSkills];
+      this.showSkillDialog = true;
+    },
+    // 取消选择
+    cancelSkillDialog() {
+      this.showSkillDialog = false;
+      this.tempSkills = [];
+    },
+    // 确认将所选 Skill 应用到当前会话
+    async confirmSkillDialog() {
+      const skills = [...this.tempSkills];
+      const sessionId = this.activeSession;
+      if (!sessionId) return;
+      this.skillLoading = true;
+      try {
+        const response = await setSessionSkills(sessionId, skills);
+        if (!response || response.status < 200 || response.status >= 300) {
+          throw new Error('设置 skill 失败');
+        }
+        this.activeSessionSkills = skills;
+        for (let kb of this.knowledgeBases) {
+          const session = kb.sessions.find(s => s.id === sessionId);
+          if (session) this.$set(session, 'skills', [...skills]);
+        }
+        this.showSkillDialog = false;
+        this.showNotification('success', 'Skill 已更新',
+          skills.length ? `当前会话已应用 Skill：${skills.join('、')}` : '当前会话已恢复默认问答模式');
+      } catch (error) {
+        const msg = error.response?.data?.message || error.response?.data?.detail
+          || error.response?.data?.title || error.message || '请稍后重试';
+        this.showNotification('error', '设置 skill 失败', msg);
+      } finally {
+        this.skillLoading = false;
+      }
+    },
     // 加载所有知识库信息
     async loadKnowledgeBases() {
       try {
@@ -931,6 +1085,7 @@ export default {
     // 选择会话
     async selectSession(sessionId) {
       this.activeSession = sessionId;
+      this.loadSessionSkill(sessionId);
       try{
 			// 从服务器加载会话历史消息
 			const response = await getSessionMessages(sessionId);
@@ -940,7 +1095,12 @@ export default {
 			// 转换消息格式，适配前端显示
 			this.messages = data.map(msg => ({
 				isUser: msg.role === 'user',
-				content: msg.content
+				content: msg.content,
+				skills: this.normalizeSkills(
+					Array.isArray(msg.message_metadata?.skills)
+						? msg.message_metadata.skills
+						: (msg.message_metadata?.skill || msg.message_metadata?.Skill)
+				)
 			}));
 
 			// 更新本地会话消息
@@ -1055,16 +1215,7 @@ export default {
       this.messages.push(userMessage);
       this.scrollToBottom();
 
-      // 保存用户消息到数据库
-      if (currentKbId) {
-        createMessage({
-          knowledge_base_id: currentKbId,
-          role: 'user',
-          content: question,
-          session_id: this.activeSession
-        }).catch(() => {
-        });
-      }
+      // 用户消息由后端 chat/rag/stream 完成后统一持久化（携带 skill 元数据），前端不再重复保存
 
       // 创建AI回复消息占位
       const aiMessage = {
@@ -1109,18 +1260,9 @@ export default {
           aiMessage.content += res.message;
           this.$forceUpdate();
           this.scrollToBottom();
-        });
+        }, this.activeSession);
 
-        // 保存AI回复到数据库
-        if (currentKbId) {
-          createMessage({
-            knowledge_base_id: currentKbId,
-            role: 'assistant',
-            content: aiMessage.content,
-            session_id: this.activeSession
-          }).catch(() => {
-          });
-        }
+        // AI 回复由后端统一持久化（携带 skill 元数据），前端不再重复保存
 
         // 更新会话消息
         for (let kb of this.knowledgeBases) {
@@ -1142,13 +1284,14 @@ export default {
         this.scrollToBottom();
         this.isGenerating = false;
         
-        // 保存错误消息到数据库
+        // 保存错误消息到数据库（后端流式出错时不落库，这里兜底记录）
         if (currentKbId) {
           createMessage({
             knowledge_base_id: currentKbId,
             role: 'assistant',
             content: aiMessage.content,
-            session_id: this.activeSession
+            session_id: this.activeSession,
+            metadata: { skills: [...this.activeSessionSkills] }
           }).catch(() => {
           });
         }
@@ -1206,10 +1349,12 @@ export default {
 /* 左侧边栏 */
 .m-deepseek-sidebar {
 	width: 300px;
+	flex-shrink: 0;
 	background-color: #f8f9fa;
 	border-right: 1px solid #e1e5e9;
 	display: flex;
 	flex-direction: column;
+	min-height: 0;
 }
 
 .m-deepseek-sidebar-header {
@@ -1268,6 +1413,8 @@ export default {
 /* 右侧主区域 */
 .m-deepseek-main {
 	flex: 1;
+	min-width: 0;
+	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	background-color: #ffffff;
@@ -1275,7 +1422,9 @@ export default {
 
 .m-deepseek-chat-area {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 	padding: 20px;
 }
 
@@ -1285,6 +1434,7 @@ export default {
 
 .m-deepseek-message-content {
 	max-width: 80%;
+	min-width: 0;
 }
 
 .m-deepseek-message-content.user {
@@ -1301,6 +1451,8 @@ export default {
 	padding: 12px 16px;
 	border-radius: 8px;
 	line-height: 1.5;
+	overflow-wrap: anywhere;
+	word-break: break-word;
 }
 
 .m-deepseek-message-content:not(.user) .m-deepseek-message-body {
@@ -1403,6 +1555,16 @@ export default {
 		border-radius: 5px;
 		overflow-x: auto;
 		margin: 10px 0;
+		max-width: 100%;
+		box-sizing: border-box;
+	}
+
+	/* 宽表格限宽并在表格内部横向滚动，避免撑破气泡 */
+	.m-deepseek-message-body table {
+		display: block;
+		max-width: 100%;
+		overflow-x: auto;
+		border-collapse: collapse;
 	}
 
 	.m-deepseek-message-body pre code {
@@ -1425,6 +1587,137 @@ export default {
 	.m-deepseek-message-body a:hover {
 		text-decoration: underline;
 	}
+
+/* 会话 Skill 按钮 */
+.m-deepseek-skill-bar {
+	margin-bottom: 12px;
+}
+
+.m-deepseek-skill-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 14px;
+	background-color: #ffffff;
+	border: 1px solid #e1e5e9;
+	border-radius: 16px;
+	font-size: 13px;
+	color: #555;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	max-width: 100%;
+}
+
+.m-deepseek-skill-btn:hover {
+	border-color: #2196f3;
+	color: #2196f3;
+}
+
+.m-deepseek-skill-btn-active {
+	border-color: #2196f3;
+	color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.06);
+	font-weight: 500;
+}
+
+.m-deepseek-skill-btn:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.m-deepseek-skill-btn-icon {
+	font-size: 13px;
+	line-height: 1;
+}
+
+.m-deepseek-skill-btn-text {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.m-deepseek-skill-btn-arrow {
+	font-size: 10px;
+	line-height: 1;
+}
+
+/* 消息上的 skill 徽标 */
+.m-deepseek-skill-tag {
+	margin-left: 8px;
+	font-size: 11px;
+	color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.08);
+	border: 1px solid rgba(33, 150, 243, 0.25);
+	border-radius: 10px;
+	padding: 1px 8px;
+}
+
+/* Skill 选择弹框 */
+.m-skill-dialog-content {
+	max-width: 480px;
+}
+
+.m-skill-list {
+	max-height: 320px;
+	overflow-y: auto;
+	margin-bottom: 16px;
+}
+
+.m-skill-item {
+	padding: 10px 12px;
+	border: 1px solid #e1e5e9;
+	border-radius: 6px;
+	margin-bottom: 8px;
+	cursor: pointer;
+	transition: all 0.2s ease;
+}
+
+.m-skill-item:hover {
+	border-color: #2196f3;
+	background-color: #f5faff;
+}
+
+.m-skill-item.active {
+	border-color: #2196f3;
+	background-color: rgba(33, 150, 243, 0.08);
+}
+
+.m-skill-item-name {
+	font-size: 14px;
+	font-weight: 500;
+	color: #333;
+}
+
+.m-skill-item-desc {
+	font-size: 12px;
+	color: #888;
+	margin-top: 2px;
+	display: -webkit-box;
+	-webkit-line-clamp: 2;
+	-webkit-box-orient: vertical;
+	overflow: hidden;
+}
+
+.m-skill-empty {
+	padding: 20px;
+	text-align: center;
+	color: #999;
+	font-size: 13px;
+}
+
+.m-skill-confirm {
+	background-color: #2196f3;
+	color: #ffffff;
+}
+
+.m-skill-confirm:hover {
+	background-color: #1976d2;
+}
+
+.m-skill-confirm:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
 
 /* 输入区域 */
 .m-deepseek-input-area {

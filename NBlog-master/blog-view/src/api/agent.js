@@ -33,6 +33,23 @@ export function createMessage(data) {
 	return axios.post(`${CHAT_API_BASE}/messages`, data)
 }
 
+// 获取可用 skill 列表（blog-agent 转发 mcp-skill-service）
+export function getSkills() {
+	return axios.get(`${CHAT_API_BASE}/agent/skills`)
+}
+
+// 获取当前会话绑定的 skill
+export function getSessionSkill(sessionId) {
+	return axios.get(`${CHAT_API_BASE}/sessions/${sessionId}/skill`)
+}
+
+// 设置当前会话绑定的 skill 列表（多选；空数组表示清除绑定）
+export function setSessionSkills(sessionId, skills) {
+	return axios.put(`${CHAT_API_BASE}/sessions/${sessionId}/skill`, {
+		skills: skills || []
+	})
+}
+
 // Agent 聊天流式响应
 export function agentChatStream(message, sessionId, conversationHistory, availableTools, onMessage) {
 	return new Promise(async (resolve, reject) => {

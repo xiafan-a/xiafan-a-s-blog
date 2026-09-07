@@ -39,8 +39,6 @@ public class AgentController {
 
     private static final Logger log = LoggerFactory.getLogger(AgentController.class);
 
-    private static final List<String> BUILT_IN_TOOLS = List.of("file_read", "file_write", "web_search");
-
     private final AgentService agentService;
     private final ToolRegistryService registry;
     private final ConversationSessionService conversationSessionService;
@@ -135,7 +133,7 @@ public class AgentController {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("success", true);
         body.put("tool", summary);
-        body.put("message", "Tool registered successfully (in-memory only, not persisted)");
+        body.put("message", "Tool registered and persisted by mcp-skill-service");
         return body;
     }
 
@@ -163,7 +161,7 @@ public class AgentController {
 
     @DeleteMapping("/tools/{toolName}")
     public Map<String, Object> deleteCustomTool(@PathVariable String toolName) {
-        if (BUILT_IN_TOOLS.contains(toolName)) {
+        if (registry.isBuiltIn(toolName)) {
             throw new BusinessException(400, "Cannot delete built-in tools");
         }
         if (!registry.unregister(toolName)) {
@@ -201,6 +199,7 @@ public class AgentController {
         payload.put("parameters", t.getParameters());
         payload.put("enabled", t.isEnabled());
         payload.put("timeout", t.getTimeout());
+        payload.put("built_in", t.isBuiltIn());
         return payload;
     }
 }

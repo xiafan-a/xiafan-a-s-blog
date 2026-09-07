@@ -1,19 +1,19 @@
-package com.xiafan.agent.service.agent;
+package com.xiafan.ai.search;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.xiafan.agent.config.AppProperties;
-import com.xiafan.agent.config.AppProperties.McpConfig;
-import com.xiafan.agent.config.AppProperties.McpServerConfig;
+import com.xiafan.ai.config.McpSearchProperties;
 import io.modelcontextprotocol.client.McpClient;
 import io.modelcontextprotocol.client.McpSyncClient;
 import io.modelcontextprotocol.client.transport.ServerParameters;
-import io.modelcontextprotocol.json.McpJsonMapper;
+import io.modelcontextprotocol.client.transport.StdioClientTransport;
+import io.modelcontextprotocol.json.McpJsonDefaults;
 import io.modelcontextprotocol.spec.McpSchema;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -22,31 +22,25 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
-/**
- * Minimal stdio MCP client used by the web_search built-in tool. The bing-search MCP
- * configuration can be replaced through app.mcp.servers without changing the tool API.
- */
 @Component
 public class McpWebSearchClient {
 
     private static final Logger log = LoggerFactory.getLogger(McpWebSearchClient.class);
     private static final String SERVER_NAME = "bing-search";
-    private static final String DEFAULT_COMMAND = "npx";
-    private static final List<String> DEFAULT_ARGS = List.of("-y", "bing-cn-mcp");
+    private static final int MAX_RESULTS = 20;
     private static final List<String> LIST_KEYS =
             List.of("webPages", "results", "data", "items", "value", "searchResults", "matches");
     private static final List<String> QUERY_KEYS =
             List.of("query", "q", "keyword", "keywords", "search_query", "searchQuery");
     private static final List<String> COUNT_KEYS =
             List.of("count", "num_results", "numResults", "limit", "top_k", "max_results", "page_size", "pageSize", "size");
-    private static final int MAX_RESULTS = 20;
 
-    private final AppProperties props;
+    private final McpSearchProperties props;
     private final ObjectMapper om;
     private final Object lock = new Object();
     private volatile McpSyncClient client;
 
-    public McpWebSearchClient(AppProperties props, ObjectMapper om) {
+    public McpWebSearchClient(McpSearchProperties props, ObjectMapper om) {
         this.props = props;
         this.om = om;
     }
@@ -60,7 +54,6 @@ public class McpWebSearchClient {
         McpSyncClient connection = retryInterrupted(this::client);
         McpSchema.Tool tool = retryInterrupted(() -> searchTool(connection.listTools()));
         Map<String, Object> arguments = arguments(tool, query, limit);
-        log.debug("Calling MCP search tool '{}' with {}", tool.name(), arguments);
         McpSchema.CallToolResult response = retryInterrupted(
                 () -> connection.callTool(new McpSchema.CallToolRequest(tool.name(), arguments)));
         if (Boolean.TRUE.equals(response.isError())) {
@@ -125,20 +118,20 @@ public class McpWebSearchClient {
     }
 
     private McpSyncClient newClient() {
-        McpConfig config = props.getMcp();
-        Duration timeout = Duration.ofSeconds(Math.max(1, config.getTimeoutSeconds()));
-        ServerParameters params = parameters(config.getServers().get(SERVER_NAME));
-        DaemonStdioClientTransport transport = new DaemonStdioClientTransport(params, McpJsonMapper.getDefault());
+        Duration timeout = Duration.ofSeconds(Math.max(1, props.getTimeoutSeconds()));
+        ServerParameters parameters = parameters(props.server(SERVER_NAME));
+        StdioClientTransport transport = new StdioClientTransport(parameters, McpJsonDefaults.getMapper());
         return McpClient.sync(transport)
+                .clientInfo(new McpSchema.Implementation("mcp-skill-service-web-search", "1.0"))
                 .requestTimeout(timeout)
                 .initializationTimeout(timeout)
                 .build();
     }
 
-    private static ServerParameters parameters(McpServerConfig server) {
-        String command = server == null || isBlank(server.getCommand()) ? DEFAULT_COMMAND : server.getCommand();
+    private static ServerParameters parameters(McpSearchProperties.ServerConfig server) {
+        String command = server == null || isBlank(server.getCommand()) ? "npx" : server.getCommand();
         List<String> args = server == null || server.getArgs() == null || server.getArgs().isEmpty()
-                ? new ArrayList<>(DEFAULT_ARGS) : new ArrayList<>(server.getArgs());
+                ? new ArrayList<>(List.of("-y", "bing-cn-mcp")) : new ArrayList<>(server.getArgs());
         if (isWindows() && !isWindowsShell(command)) {
             List<String> wrapped = new ArrayList<>();
             wrapped.add("/c");
@@ -177,8 +170,7 @@ public class McpWebSearchClient {
     }
 
     private static Map<String, Object> arguments(McpSchema.Tool tool, String query, int limit) {
-        Map<String, Object> properties = tool == null || tool.inputSchema() == null || tool.inputSchema().properties() == null
-                ? Map.of() : tool.inputSchema().properties();
+        Map<String, Object> properties = schemaProperties(tool == null ? null : tool.inputSchema());
         String queryKey = firstExisting(properties, QUERY_KEYS);
         if (queryKey == null) {
             queryKey = "query";
@@ -190,6 +182,18 @@ public class McpWebSearchClient {
             arguments.put(countKey, limit);
         }
         return arguments;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> schemaProperties(Map<String, Object> schema) {
+        if (schema == null) {
+            return Map.of();
+        }
+        Object properties = schema.get("properties");
+        if (properties instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
     }
 
     private static String firstExisting(Map<String, Object> properties, List<String> candidates) {
@@ -228,7 +232,11 @@ public class McpWebSearchClient {
         if (value == null) {
             return null;
         }
-        return om.valueToTree(value);
+        try {
+            return om.readTree(om.writeValueAsString(value));
+        } catch (JacksonException e) {
+            return null;
+        }
     }
 
     private JsonNode tryJson(String text) {
@@ -238,7 +246,7 @@ public class McpWebSearchClient {
         }
         try {
             return om.readTree(trimmed);
-        } catch (Exception ignored) {
+        } catch (JacksonException e) {
             return null;
         }
     }
@@ -334,11 +342,11 @@ public class McpWebSearchClient {
         }
         StringBuilder text = new StringBuilder();
         for (McpSchema.Content content : response.content()) {
-            if (content instanceof McpSchema.TextContent tc && tc.text() != null) {
+            if (content instanceof McpSchema.TextContent textContent && textContent.text() != null) {
                 if (!text.isEmpty()) {
                     text.append('\n');
                 }
-                text.append(tc.text());
+                text.append(textContent.text());
             }
         }
         return text.toString().trim();
