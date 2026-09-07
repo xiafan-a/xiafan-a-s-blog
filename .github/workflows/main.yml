@@ -87,10 +87,33 @@ jobs:
           path: blog-agent/agent/target/*.jar
           retention-days: 3
 
+  build-mcp-skill-service:
+    name: Build MCP Skill Service
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Build with Maven
+        working-directory: ./mcp-skill-service
+        run: mvn clean package -DskipTests
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mcp-skill-service-jar
+          path: mcp-skill-service/target/*.jar
+          retention-days: 3
 
   deploy:
     name: Deploy to Server
-    needs: [build-frontend, build-java, build-agent]
+    needs: [build-frontend, build-java, build-agent, build-mcp-skill-service]
     runs-on: ubuntu-latest
     environment: host
     if: github.event_name == 'push'
@@ -140,3 +163,12 @@ jobs:
         run: |
           scp -o StrictHostKeyChecking=no artifacts/blog-agent-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-agent"
+
+      - name: Deploy MCP Skill Service
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/capability/mcp-skill-service"
+          scp -o StrictHostKeyChecking=no artifacts/mcp-skill-service-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/capability/mcp-skill-service/app.jar
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart mcp-skill-service"
