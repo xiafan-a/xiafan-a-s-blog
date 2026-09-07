@@ -161,7 +161,9 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/backend/blog-agent"
           scp -o StrictHostKeyChecking=no artifacts/blog-agent-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
+          scp -o StrictHostKeyChecking=no blog-agent/Dockerfile $SERVER_USER@$SERVER_HOST:/root/blog/backend/blog-agent/Dockerfile
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-agent"
 
       - name: Deploy MCP Skill Service
@@ -169,6 +171,7 @@ jobs:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/capability/mcp-skill-service"
-          scp -o StrictHostKeyChecking=no artifacts/mcp-skill-service-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/capability/mcp-skill-service/app.jar
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/backend/mcp-skill-service"
+          scp -o StrictHostKeyChecking=no artifacts/mcp-skill-service-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/mcp-skill-service.0.0.1.jar
+          scp -o StrictHostKeyChecking=no mcp-skill-service/Dockerfile $SERVER_USER@$SERVER_HOST:/root/blog/backend/mcp-skill-service/Dockerfile
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart mcp-skill-service"
