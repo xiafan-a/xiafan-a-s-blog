@@ -91,7 +91,7 @@
 							</div>
 							<!-- 用户消息直接显示内容 -->
 							<div class="m-deepseek-message-body" v-if="message.isUser">
-								<span v-html="message.content"></span>
+								<div v-html="message.content"></div>
 							</div>
 							<!-- AI消息：先显示思考动画，再显示步骤，最后显示最终内容 -->
 							<div v-else>
@@ -154,7 +154,7 @@
 								</div>
 								<!-- 最终内容 -->
 								<div class="m-deepseek-message-body" v-if="message.content">
-									<span v-html="parseMarkdown(message.content)"></span>
+									<div v-html="parseMarkdown(message.content)"></div>
 								</div>
 							</div>
 						</div>
@@ -1104,10 +1104,18 @@ export default {
 }
 
 .m-deepseek-message-body table {
-	display: block;
+	width: 100%;
 	max-width: 100%;
-	overflow-x: auto;
+	table-layout: fixed;
 	border-collapse: collapse;
+}
+
+.m-deepseek-message-body th,
+.m-deepseek-message-body td {
+	word-break: break-word;
+	overflow-wrap: anywhere;
+	padding: 6px 10px;
+	border: 1px solid #e1e5e9;
 }
 
 .m-deepseek-message-content:not(.user) .m-deepseek-message-body {

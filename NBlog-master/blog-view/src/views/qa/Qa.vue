@@ -57,7 +57,7 @@
 								<span class="m-deepseek-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</span>
 							</div>
 							<div class="m-deepseek-message-body" v-if="message.isUser || message.content">
-								<span v-html="message.isUser ? message.content : parseMarkdown(message.content)"></span>
+								<div v-html="message.isUser ? message.content : parseMarkdown(message.content)"></div>
 							</div>
 							<div class="m-deepseek-message-body m-deepseek-thinking" v-else>
 								<span class="m-thinking-text">思考中</span>
@@ -1559,12 +1559,20 @@ export default {
 		box-sizing: border-box;
 	}
 
-	/* 宽表格限宽并在表格内部横向滚动，避免撑破气泡 */
+	/* 宽表格：限制在气泡内，单元格内容自动换行，避免撑破气泡 */
 	.m-deepseek-message-body table {
-		display: block;
+		width: 100%;
 		max-width: 100%;
-		overflow-x: auto;
+		table-layout: fixed;
 		border-collapse: collapse;
+	}
+
+	.m-deepseek-message-body th,
+	.m-deepseek-message-body td {
+		word-break: break-word;
+		overflow-wrap: anywhere;
+		padding: 6px 10px;
+		border: 1px solid #e1e5e9;
 	}
 
 	.m-deepseek-message-body pre code {
