@@ -28,7 +28,9 @@
 
     <!--查询昨天的所有新增访客的ip来源-->
     <select id="getNewVisitorIpSourceByYesterday" resultType="java.lang.String">
-        select ip_source from visitor where date(create_time)=date_sub(CURRENT_DATE, interval 1 day)
+        select ip_source from visitor
+        where create_time &gt;= CURRENT_DATE - INTERVAL '1 day'
+          and create_time &lt; CURRENT_DATE
     </select>
 
     <!--查询是否存在某个uuid-->

@@ -15,7 +15,6 @@
     <!--添加访问记录-->
     <insert id="saveCityVisitor" parameterType="top.naccl.entity.CityVisitor">
         insert into city_visitor (city, uv) values (#{city}, #{uv})
-        on duplicate key update
-        uv=uv+#{uv}
+        on conflict (city) do update set uv = city_visitor.uv + excluded.uv
     </insert>
 </mapper>

@@ -62,6 +62,8 @@
 
     <!--查询今日访问量-->
     <select id="countVisitLogByToday" resultType="java.lang.Integer">
-        select count(*) from visit_log where date(create_time)=CURRENT_DATE
+        select count(*) from visit_log
+        where create_time &gt;= CURRENT_DATE
+          and create_time &lt; CURRENT_DATE + INTERVAL '1 day'
     </select>
 </mapper>
