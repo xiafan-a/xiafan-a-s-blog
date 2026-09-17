@@ -42,7 +42,11 @@
 
     <!--查询昨天的所有访问日志-->
     <select id="getUUIDAndCreateTimeByYesterday" resultMap="logDTO">
-        select uuid, create_time from visit_log where date(create_time)=date_sub(CURRENT_DATE), interval 1 day) order by create_time desc
+        SELECT uuid, create_time
+        FROM visit_log
+        WHERE create_time &gt;= CURRENT_DATE - INTERVAL '1 day'
+          AND create_time &lt; CURRENT_DATE
+        ORDER BY create_time DESC
     </select>
 
     <!--添加日志-->
