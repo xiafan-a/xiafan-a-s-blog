@@ -30,6 +30,12 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
+      - name: Build blog-agent
+        working-directory: ./NBlog-master/blog-agent
+        run: |
+          npm install --no-audit --no-fund
+          npm run build
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -37,6 +43,7 @@ jobs:
           path: |
             NBlog-master/blog-cms/dist
             NBlog-master/blog-view/dist
+            NBlog-master/blog-agent/dist
           retention-days: 3
 
   build-java:
@@ -140,11 +147,15 @@ jobs:
           rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
             artifacts/frontend-dist/blog-cms/dist/ \
             $SERVER_USER@$SERVER_HOST:/root/blog/frontend/cms/dist/
-          
+
           rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
             artifacts/frontend-dist/blog-view/dist/ \
             $SERVER_USER@$SERVER_HOST:/root/blog/frontend/view/dist/
-          
+
+          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
+            artifacts/frontend-dist/blog-agent/dist/ \
+            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/agent/dist/
+
           # SSH 命令也添加相同参数
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker exec blog-nginx nginx -s reload"
 

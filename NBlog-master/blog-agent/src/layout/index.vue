@@ -1,11 +1,15 @@
 <template>
-	<div class="app-wrapper">
-		<sidebar class="sidebar-container" :opened="sidebarOpen"/>
+	<div class="app-wrapper" :class="{'sidebar-collapsed': collapsed}">
+		<sidebar class="sidebar-container" :opened="mobileOpen"/>
 		<div class="main-container">
-			<!-- 顶栏:模式(模型)选择器 + 移动端汉堡按钮 -->
-			<top-bar @toggle-sidebar="sidebarOpen = !sidebarOpen"/>
+			<!-- 顶栏:侧边栏收缩按钮 + 模式(模型)选择器 + 移动端汉堡按钮 -->
+			<top-bar
+				:collapsed="collapsed"
+				@toggle-collapse="toggleCollapse"
+				@toggle-mobile="mobileOpen = !mobileOpen"
+			/>
 			<!-- 移动端遮罩 -->
-			<div class="drawer-mask" v-if="sidebarOpen" @click="sidebarOpen = false"></div>
+			<div class="drawer-mask" v-if="mobileOpen" @click="mobileOpen = false"></div>
 			<!-- 页面内容 -->
 			<div class="app-main">
 				<router-view/>
@@ -23,13 +27,22 @@
 		components: {Sidebar, TopBar},
 		data() {
 			return {
-				sidebarOpen: false // 移动端侧边栏展开状态(桌面端始终展示)
+				mobileOpen: false, // 移动端侧边栏展开状态
+				// 桌面端侧边栏收起状态(持久化到 localStorage)
+				collapsed: window.localStorage.getItem('agent_sidebar_collapsed') === '1'
 			}
 		},
 		watch: {
 			//路由切换时收起移动端侧边栏
 			'$route.path'() {
-				this.sidebarOpen = false
+				this.mobileOpen = false
+			}
+		},
+		methods: {
+			//桌面端收缩/展开侧边栏
+			toggleCollapse() {
+				this.collapsed = !this.collapsed
+				window.localStorage.setItem('agent_sidebar_collapsed', this.collapsed ? '1' : '0')
 			}
 		}
 	}
@@ -45,6 +58,16 @@
 
 	.sidebar-container {
 		flex-shrink: 0;
+		width: 240px;
+		overflow: hidden;
+		transition: width 0.25s ease, transform 0.25s ease;
+	}
+
+	/* 桌面端:点击收缩按钮后侧边栏滑出隐藏 */
+	@media (min-width: 769px) {
+		.sidebar-collapsed .sidebar-container {
+			width: 0;
+		}
 	}
 
 	.main-container {
@@ -90,7 +113,6 @@
 			bottom: 0;
 			z-index: 999;
 			transform: translateX(-100%);
-			transition: transform 0.25s ease;
 		}
 
 		.sidebar-container.sidebar-open {

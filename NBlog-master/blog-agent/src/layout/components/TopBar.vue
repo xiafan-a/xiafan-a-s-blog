@@ -1,7 +1,21 @@
 <template>
 	<div class="top-bar">
+		<!-- 桌面端:侧边栏收缩/展开按钮 -->
+		<button
+			class="sidebar-toggle-btn"
+			:class="{collapsed: collapsed}"
+			:title="collapsed ? '展开侧边栏' : '收起侧边栏'"
+			aria-label="切换侧边栏"
+			@click="$emit('toggle-collapse')"
+		>
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+				<line x1="9" y1="3" x2="9" y2="21"/>
+			</svg>
+		</button>
+
 		<!-- 移动端汉堡按钮 -->
-		<button class="hamburger-btn" @click="$emit('toggle-sidebar')" aria-label="菜单">
+		<button class="hamburger-btn" @click="$emit('toggle-mobile')" aria-label="菜单">
 			<span class="hamburger-line"></span>
 			<span class="hamburger-line"></span>
 			<span class="hamburger-line"></span>
@@ -42,6 +56,13 @@
 <script>
 	export default {
 		name: 'TopBar',
+		props: {
+			// 桌面端侧边栏是否已收起(仅用于按钮状态样式)
+			collapsed: {
+				type: Boolean,
+				default: false
+			}
+		},
 		data() {
 			return {
 				pickerOpen: false
@@ -86,6 +107,35 @@
 
 	.hamburger-btn {
 		display: none;
+	}
+
+	/* 桌面端:侧边栏收缩/展开按钮 */
+	.sidebar-toggle-btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 34px;
+		height: 34px;
+		margin-right: 6px;
+		background: none;
+		border: none;
+		border-radius: 8px;
+		color: #0d0d0d;
+		cursor: pointer;
+		transition: background-color 0.15s ease;
+	}
+
+	.sidebar-toggle-btn:hover {
+		background-color: #ececec;
+	}
+
+	.sidebar-toggle-btn.collapsed {
+		color: #6b6b6b;
+	}
+
+	.sidebar-toggle-btn svg {
+		width: 18px;
+		height: 18px;
 	}
 
 	.model-picker {
@@ -175,6 +225,10 @@
 	}
 
 	@media (max-width: 768px) {
+		.sidebar-toggle-btn {
+			display: none;
+		}
+
 		.hamburger-btn {
 			display: inline-flex;
 			flex-direction: column;
