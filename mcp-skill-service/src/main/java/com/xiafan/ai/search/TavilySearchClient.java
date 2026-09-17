@@ -57,6 +57,31 @@ public class TavilySearchClient {
         return props.isEnabled() && props.getApiKey() != null && !props.getApiKey().isBlank();
     }
 
+    /** app.tavily.enabled 原值，用于启动日志区分「被开关关掉」和「没填 Key」。 */
+    public boolean isEnabled() {
+        return props.isEnabled();
+    }
+
+    /** 打日志用的脱敏 Key：只留头尾，便于确认容器里拿到的是不是同一个 Key。 */
+    public String maskedApiKey() {
+        String key = props.getApiKey() == null ? "" : props.getApiKey().trim();
+        if (key.isEmpty()) {
+            return "(empty)";
+        }
+        if (key.length() <= 12) {
+            return key.charAt(0) + "***";
+        }
+        return key.substring(0, 8) + "***" + key.substring(key.length() - 4);
+    }
+
+    public String apiUrl() {
+        return searchUrl();
+    }
+
+    public int timeoutSeconds() {
+        return Math.max(1, props.getTimeoutSeconds());
+    }
+
     public int defaultNumResults() {
         return normalizeCount(props.getMaxResults());
     }

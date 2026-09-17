@@ -1,9 +1,11 @@
 package com.xiafan.ai.tool;
 
+import com.xiafan.ai.config.McpSearchProperties;
 import com.xiafan.ai.config.SearchProperties;
 import com.xiafan.ai.search.McpWebSearchClient;
 import com.xiafan.ai.search.TavilyExtractClient;
 import com.xiafan.ai.search.TavilySearchClient;
+import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -52,20 +54,51 @@ public class BuiltinTools {
     private final TavilySearchClient tavilySearch;
     private final TavilyExtractClient tavilyExtract;
     private final SearchProperties searchProps;
+    private final McpSearchProperties mcpProps;
     private final JdbcTemplate jdbc;
     private final ObjectMapper om;
     private final HttpClient http;
 
     public BuiltinTools(McpWebSearchClient webSearch, TavilySearchClient tavilySearch,
                         TavilyExtractClient tavilyExtract, SearchProperties searchProps,
-                        JdbcTemplate jdbc, ObjectMapper om) {
+                        McpSearchProperties mcpProps, JdbcTemplate jdbc, ObjectMapper om) {
         this.webSearch = webSearch;
         this.tavilySearch = tavilySearch;
         this.tavilyExtract = tavilyExtract;
         this.searchProps = searchProps;
+        this.mcpProps = mcpProps;
         this.jdbc = jdbc;
         this.om = om;
         this.http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
+    }
+
+    /**
+     * 启动时打印一次搜索路由，云端日志里可以一眼确认 web_search 实际会用哪个源。
+     *
+     * <p>关键看 {@code effective order} 的第一项：{@code [tavily, bing-mcp]} 表示默认走 Tavily；
+     * 只剩 {@code [bing-mcp]} 说明 Tavily 没配好（Key 为空或 app.tavily.enabled=false），
+     * 这时 web_search 会直接落到 bing，结果里也不会出现 fallback_from。</p>
+     */
+    @PostConstruct
+    void logSearchRouting() {
+        List<String> order = searchOrder(null);
+        log.info("[web_search] default source = {} | effective order = {} | fallback enabled = {}",
+                order.get(0), order, searchProps == null || searchProps.isFallbackEnabled());
+        if (tavilySearch.isConfigured()) {
+            log.info("[web_search] tavily: enabled={}, key={}, url={}, search-depth={}, max-results={}, timeout={}s",
+                    tavilySearch.isEnabled(), tavilySearch.maskedApiKey(), tavilySearch.apiUrl(),
+                    tavilySearch.defaultSearchDepth(), tavilySearch.defaultNumResults(),
+                    tavilySearch.timeoutSeconds());
+        } else {
+            log.warn("[web_search] tavily is NOT configured (enabled={}, key={}) -> searching falls back to bing-mcp; "
+                            + "set TAVILY_API_KEY (and TAVILY_ENABLED=true) to make Tavily the default source",
+                    tavilySearch.isEnabled(), tavilySearch.maskedApiKey());
+        }
+        McpSearchProperties.ServerConfig bing = mcpProps == null ? null : mcpProps.server("bing-search");
+        log.info("[web_search] bing fallback(mcp): command={}, args={}, timeout={}s",
+                bing == null ? "npx" : bing.getCommand(),
+                bing == null ? List.of("-y", "bing-cn-mcp") : bing.getArgs(),
+                mcpProps == null ? 120 : mcpProps.getTimeoutSeconds());
     }
 
     public List<Spec> all() {
