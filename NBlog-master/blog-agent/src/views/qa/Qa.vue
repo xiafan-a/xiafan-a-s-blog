@@ -1,5 +1,5 @@
 <template>
-	<div class="ui container m-top">
+	<div class="m-page">
 		<div class="m-deepseek-container">
 			<!-- 左侧知识库和会话管理 -->
 			<div class="m-deepseek-sidebar">

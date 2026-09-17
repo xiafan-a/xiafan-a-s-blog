@@ -24,12 +24,6 @@
 			<router-link to="/friends" class="item" :class="{'m-mobile-hide': mobileHide,'active':$route.name==='friends'}">
 				<i class="users icon"></i>友人帐
 			</router-link>
-			<router-link to="/qa" class="item" :class="{'m-mobile-hide': mobileHide,'active':$route.name==='qa'}">
-				<i class="question circle icon"></i>知识库
-			</router-link>
-			<router-link to="/agent" class="item" :class="{'m-mobile-hide': mobileHide,'active':$route.name==='agent'}">
-				<i class="android icon"></i>智能体
-			</router-link>
 			<router-link to="/wordgame" class="item" :class="{'m-mobile-hide': mobileHide,'active':$route.name==='wordgame'}">
 				<i class="gamepad icon"></i>猜字游戏
 			</router-link>

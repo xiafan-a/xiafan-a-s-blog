@@ -1,0 +1,49 @@
+* {
+	box-sizing: border-box;
+}
+
+html, body {
+	height: 100%;
+	margin: 0;
+	padding: 0;
+}
+
+body {
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+	font-size: 14px;
+	color: #35363a;
+	background-color: #f7f7f8;
+	-webkit-font-smoothing: antialiased;
+}
+
+#app {
+	height: 100%;
+}
+
+/* 页面根容器:由视图组件使用,占满内容区 */
+.m-page {
+	height: 100%;
+	width: 100%;
+}
+
+/* 通用细滚动条(DeepSeek 风格) */
+.m-page ::-webkit-scrollbar,
+.sidebar ::-webkit-scrollbar {
+	width: 6px;
+	height: 6px;
+}
+
+.m-page ::-webkit-scrollbar-thumb,
+.sidebar ::-webkit-scrollbar-thumb {
+	background-color: rgba(0, 0, 0, 0.18);
+	border-radius: 3px;
+}
+
+.sidebar ::-webkit-scrollbar-thumb {
+	background-color: rgba(255, 255, 255, 0.18);
+}
+
+.m-page ::-webkit-scrollbar-track,
+.sidebar ::-webkit-scrollbar-track {
+	background: transparent;
+}

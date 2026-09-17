@@ -64,18 +64,6 @@ const routes = [
 				meta: {title: '关于我'}
 			},
 			{
-				path: '/qa',
-				name: 'qa',
-				component: () => import('@/views/qa/Qa'),
-				meta: {title: '知识问答'}
-			},
-			{
-				path: '/agent',
-				name: 'agent',
-				component: () => import('@/views/agent/Agent'),
-				meta: {title: '智能体'}
-			},
-			{
 				path: '/wordgame',
 				name: 'wordgame',
 				component: () => import('@/views/wordgame/WordGame'),

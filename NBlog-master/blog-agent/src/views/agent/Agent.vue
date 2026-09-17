@@ -1,5 +1,5 @@
 <template>
-	<div class="ui container m-top">
+	<div class="m-page">
 		<div class="m-deepseek-container">
 			<!-- 右侧对话区域 -->
 			<div class="m-deepseek-main">
