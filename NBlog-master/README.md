@@ -102,8 +102,8 @@ UI 框架为 [Element UI](https://github.com/ElemeFE/element)
 2. 修改配置信息`/blog-api/src/main/resources/application-dev.properties`
 3. 安装 Redis 并启动
 4. 启动后端服务
-5. 分别在`blog-cms`和`blog-view`目录下执行`npm install`安装依赖
-6. 分别在`blog-cms`和`blog-view`目录下执行`npm run serve`启动前后台页面
+5. 分别在`blog-cms`、`blog-view`和`blog-agent`目录下执行`npm install`安装依赖
+6. 分别在`blog-cms`、`blog-view`和`blog-agent`目录下执行`npm run serve`启动前后台页面(`blog-agent`为知识库问答与智能体独立前端,默认端口 8089,依赖后端聊天服务,详见`blog-agent/README.md`)
 
 
 
