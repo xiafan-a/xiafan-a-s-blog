@@ -6,6 +6,8 @@ import Element from 'element-ui'
 import 'element-ui/lib/theme-chalk/index.css'
 //自定义css
 import './assets/css/base.css'
+//ChatGPT 风格共享聊天样式
+import './assets/css/chat.css'
 //阿里icon
 import './assets/css/icon/iconfont.css'
 

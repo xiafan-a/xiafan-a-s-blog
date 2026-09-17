@@ -1,65 +1,32 @@
 <template>
-	<div class="m-page">
-		<div class="m-deepseek-container">
-			<!-- 左侧知识库和会话管理 -->
-			<div class="m-deepseek-sidebar">
-				<div class="m-deepseek-sidebar-header">
-					<h3>知识库</h3>
+	<div class="chat-page">
+		<!-- 消息区域 -->
+		<div class="chat-scroll" ref="chatArea" @scroll="handleChatScroll">
+			<!-- 空状态 -->
+			<div class="chat-empty" v-if="messages.length === 0">
+				<div class="chat-empty-logo">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+					</svg>
 				</div>
-				
-				<!-- 知识库列表 -->
-				<div class="m-deepseek-sidebar-content">
-					<KnowledgeBaseItem 
-						v-for="kb in knowledgeBases" 
-						:key="kb.id" 
-						:kb="kb"
-						@add-session="addSession"
-						@edit-kb="showEditKbForm"
-						@upload-document="uploadKnowledgeDocument"
-						@delete-kb="handleDeleteKnowledgeBase"
-						@load-sessions="loadKnowledgeBaseSessions"
-					>
-						<div class="m-deepseek-session-list" v-if="kb.sessions.length > 0">
-							<SessionItem 
-								v-for="(session, sessionIndex) in kb.sessions"
-								:key="session.id"
-								:session="session"
-								:sessionIndex="sessionIndex"
-								:kbId="kb.id"
-								:activeSession="activeSession"
-								@select-session="selectSession"
-								@start-edit="startEditSession"
-								@delete-session="handleDeleteSession"
-							/>
-						</div>
-					</KnowledgeBaseItem>
-				</div>
-				
-				<!-- 添加知识库按钮 -->
-				<div class="m-deepseek-sidebar-footer">
-					<button class="m-deepseek-btn m-deepseek-add-btn" @click="addKnowledgeBase">
-						<i class="iconfont icon-add"></i> 新建知识库
-					</button>
-				</div>
+				<h2>有什么可以帮您？</h2>
+				<p>基于知识库的智能问答,在左侧选择会话或直接输入问题开始</p>
 			</div>
-			
-			<!-- 右侧对话区域 -->
-			<div class="m-deepseek-main">
-				<!-- 对话内容 -->
-				<div class="m-deepseek-chat-area" ref="chatArea" @scroll="handleChatScroll">
-					<div class="m-deepseek-message" v-for="(message, msgIndex) in messages" :key="msgIndex">
-						<div class="m-deepseek-message-content" :class="{user: message.isUser}">
-							<div class="m-deepseek-message-header" v-if="message.isUser">
-								<span>我</span>
-							</div>
-							<div class="m-deepseek-message-header" v-else>
-								<span>知识库</span>
-								<span class="m-deepseek-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</span>
-							</div>
-							<div class="m-deepseek-message-body" v-if="message.isUser || message.content">
-								<div v-html="message.isUser ? message.content : parseMarkdown(message.content)"></div>
-							</div>
-							<div class="m-deepseek-message-body m-deepseek-thinking" v-else>
+
+			<!-- 消息列表 -->
+			<div class="chat-inner" v-else>
+				<div class="msg-row" v-for="(message, msgIndex) in messages" :key="msgIndex" :class="{user: message.isUser}">
+					<!-- 用户消息:右侧气泡 -->
+					<div class="msg-bubble" v-if="message.isUser" v-html="message.content"></div>
+					<!-- 助手消息:头像 + Markdown -->
+					<template v-else>
+						<div class="msg-avatar">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"/>
+							</svg>
+						</div>
+						<div class="msg-content">
+							<div class="md-body md-thinking" v-if="!message.content">
 								<span class="m-thinking-text">思考中</span>
 								<span class="m-thinking-dots">
 									<span class="m-dot"></span>
@@ -67,47 +34,50 @@
 									<span class="m-dot"></span>
 								</span>
 							</div>
+							<div class="md-body" v-else>
+								<div v-html="parseMarkdown(message.content)"></div>
+							</div>
+							<div class="msg-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</div>
 						</div>
-					</div>
-				</div>
-				
-				<!-- 输入框 -->
-				<div class="m-deepseek-input-area" v-if="activeSession">
-					<!-- 会话 Skill 按钮 -->
-					<div class="m-deepseek-skill-bar">
-						<button
-							class="m-deepseek-skill-btn"
-							:class="{ 'm-deepseek-skill-btn-active': activeSessionSkills.length > 0 }"
-							:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
-							:disabled="skillLoading"
-							@click="openSkillDialog"
-						>
-							<span class="m-deepseek-skill-btn-icon">🧩</span>
-							<span class="m-deepseek-skill-btn-text">{{ activeSessionSkills.length ? 'Skill ×' + activeSessionSkills.length : '选择 Skill' }}</span>
-							<span class="m-deepseek-skill-btn-arrow">▾</span>
-						</button>
-					</div>
-					<div class="m-deepseek-input-container">
-						<div class="m-deepseek-input-wrapper">
-							<textarea 
-								v-model="inputMessage" 
-								placeholder="输入问题..." 
-								@keydown.ctrl.enter.prevent="sendMessage"
-								@keydown.meta.enter.prevent="sendMessage"
-								class="m-deepseek-input"
-								rows="3"
-								:disabled="isGenerating"
-								ref="messageInput"
-							></textarea>
-						</div>
-						<button class="m-deepseek-send-btn" @click="sendMessage" :disabled="isGenerating">
-							<span class="m-deepseek-send-btn-text">↑</span>
-						</button>
-					</div>
+					</template>
 				</div>
 			</div>
 		</div>
-		
+
+		<!-- 输入区 -->
+		<div class="input-dock">
+			<div class="input-box">
+				<button
+					class="skill-pill"
+					:class="{active: activeSessionSkills.length > 0}"
+					:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
+					:disabled="skillLoading"
+					@click="openSkillDialog"
+				>
+					<span>🧩</span>
+					<span>{{ activeSessionSkills.length ? 'Skill ×' + activeSessionSkills.length : 'Skill' }}</span>
+				</button>
+				<textarea
+					v-model="inputMessage"
+					placeholder="输入问题..."
+					@keydown.ctrl.enter.prevent="sendMessage"
+					@keydown.meta.enter.prevent="sendMessage"
+					@input="autoResize"
+					class="chat-input"
+					rows="1"
+					:disabled="isGenerating"
+					ref="messageInput"
+				></textarea>
+				<button class="send-btn" @click="sendMessage" :disabled="isGenerating" aria-label="发送">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="12" y1="19" x2="12" y2="5"/>
+						<polyline points="5 12 12 5 19 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="input-hint">Ctrl + Enter 发送 · AI 生成内容仅供参考</div>
+		</div>
+
 		<!-- 确认删除弹框 -->
 		<div class="m-delete-confirm" v-if="showConfirmDialog">
 			<div class="m-delete-confirm-overlay"></div>
@@ -120,7 +90,7 @@
 				</div>
 			</div>
 		</div>
-		
+
 		<!-- 添加知识库表单弹框 -->
 		<div class="m-add-kb-form" v-if="showAddKbForm">
 			<div class="m-delete-confirm-overlay"></div>
@@ -146,7 +116,7 @@
 				</div>
 			</div>
 		</div>
-		
+
 		<!-- 修改知识库表单弹框 -->
 		<div class="m-add-kb-form" v-if="showEditForm">
 			<div class="m-delete-confirm-overlay"></div>
@@ -172,7 +142,7 @@
 				</div>
 			</div>
 		</div>
-		
+
 		<!-- 修改会话名称表单弹框 -->
 		<div class="m-add-kb-form" v-if="showEditSessionForm">
 			<div class="m-delete-confirm-overlay"></div>
@@ -190,7 +160,7 @@
 				</div>
 			</div>
 		</div>
-		
+
 		<!-- 选择会话 Skill 弹框 -->
 		<div class="m-add-kb-form" v-if="showSkillDialog">
 			<div class="m-delete-confirm-overlay" @click="cancelSkillDialog"></div>
@@ -227,31 +197,31 @@
 			<div class="m-delete-confirm-overlay"></div>
 			<div class="m-add-kb-form-content">
 				<h4>上传知识文档</h4>
-				
+
 				<!-- 标签页 -->
 				<div class="m-upload-tabs">
-					<button 
-						class="m-upload-tab" 
+					<button
+						class="m-upload-tab"
 						:class="{ 'm-upload-tab-active': activeTab === 'upload' }"
 						@click="activeTab = 'upload'"
 					>
 						上传文件
 					</button>
-					<button 
-						class="m-upload-tab" 
+					<button
+						class="m-upload-tab"
 						:class="{ 'm-upload-tab-active': activeTab === 'files' }"
 						@click="switchToFilesTab"
 					>
 						已上传文件
 					</button>
 				</div>
-				
+
 				<div class="m-upload-dialog-body">
 					<!-- 上传文件标签页 -->
 					<div v-if="activeTab === 'upload'">
 						<!-- 拖拽区域 -->
-						<div 
-							class="m-upload-dropzone" 
+						<div
+							class="m-upload-dropzone"
 							:class="{ 'm-upload-dropzone-active': dragOver }"
 							@dragover="handleDragOver"
 							@dragleave="handleDragLeave"
@@ -262,9 +232,9 @@
 								<p class="m-upload-text">拖入文件到此处，或</p>
 								<label class="m-upload-btn">
 									选择文件
-									<input 
-										type="file" 
-										accept=".txt,.md,.pdf,.doc,.docx" 
+									<input
+										type="file"
+										accept=".txt,.md,.pdf,.doc,.docx"
 										@change="handleFileSelect"
 										style="display: none;"
 									>
@@ -272,7 +242,7 @@
 								<p class="m-upload-hint">支持上传 txt、md、pdf、doc、docx 文件</p>
 							</div>
 						</div>
-						
+
 						<!-- 已选择文件列表 -->
 						<div class="m-upload-file-list" v-if="uploadFiles.length > 0">
 							<h5>已选择的文件</h5>
@@ -283,7 +253,7 @@
 							</div>
 						</div>
 					</div>
-					
+
 					<!-- 已上传文件标签页 -->
 					<div v-if="activeTab === 'files'">
 						<div v-if="isLoadingFiles" class="m-upload-loading">
@@ -313,8 +283,8 @@
 				</div>
 				<div class="m-delete-confirm-actions">
 					<button class="m-delete-confirm-btn m-delete-confirm-cancel" @click="cancelUpload">取消</button>
-					<button 
-						class="m-delete-confirm-btn m-delete-confirm-confirm" 
+					<button
+						class="m-delete-confirm-btn m-delete-confirm-confirm"
 						@click="startUpload"
 						v-if="activeTab === 'upload'"
 					>
@@ -323,7 +293,7 @@
 				</div>
 			</div>
 		</div>
-		
+
 		<!-- 页面内通知 -->
 		<div class="m-alert-container" v-if="notificationVisible">
 			<el-alert
@@ -340,19 +310,14 @@
 </template>
 
 <script>
-import KnowledgeBaseItem from '@/components/qa/KnowledgeBaseItem.vue';
-import SessionItem from '@/components/qa/SessionItem.vue';
 import { chatStream, getKnowledgeBases, getKnowledgeBaseSessions, createKnowledgeBase, deleteKnowledgeBase, updateKnowledgeBase, createSession, updateSession, deleteSession, createMessage, getSessionMessages, uploadKnowledgeFile, getKnowledgeFiles, deleteKnowledgeFile, getSkills, getSessionSkill, setSessionSkills } from '@/api/qa';
 import MarkdownIt from 'markdown-it';
 import mk from '@iktakahiro/markdown-it-katex';
 import 'katex/dist/katex.min.css';
+import { bus, chatState } from '@/util/chat-bus';
 
 export default {
   name: "Qa",
-  components: {
-    KnowledgeBaseItem,
-    SessionItem
-  },
   data() {
     return {
       md: new MarkdownIt({
@@ -428,13 +393,78 @@ export default {
       return lines.join('\n');
     }
   },
+  watch: {
+    // 知识库/会话列表变化时同步到侧边栏
+    knowledgeBases: {
+      deep: true,
+      handler: 'syncSidebarState'
+    },
+    activeSession: 'syncSidebarState'
+  },
   mounted() {
     // 页面加载时获取可用 skill 列表
     this.loadSkills();
-    // 页面加载时获取知识库信息
-    this.loadKnowledgeBases();
+    // 页面加载时获取知识库信息(并加载各知识库下的会话,供侧边栏展示)
+    this.loadKnowledgeBases().then(() => {
+      this.knowledgeBases.forEach(kb => this.loadKnowledgeBaseSessions(kb.id));
+    });
+    // 监听侧边栏事件
+    bus.$on('qa:new-kb', this.addKnowledgeBase);
+    bus.$on('qa:new-session', this.handleNewChatRequest);
+    bus.$on('qa:add-session', this.handleAddSession);
+    bus.$on('qa:upload', this.uploadKnowledgeDocument);
+    bus.$on('qa:edit-kb', this.showEditKbForm);
+    bus.$on('qa:delete-kb', this.handleDeleteKnowledgeBase);
+    bus.$on('qa:select', this.selectSession);
+    bus.$on('qa:rename-session', this.renameSessionFromSidebar);
+    bus.$on('qa:delete-session', this.handleDeleteSession);
+  },
+  beforeDestroy() {
+    bus.$off('qa:new-kb', this.addKnowledgeBase);
+    bus.$off('qa:new-session', this.handleNewChatRequest);
+    bus.$off('qa:add-session', this.handleAddSession);
+    bus.$off('qa:upload', this.uploadKnowledgeDocument);
+    bus.$off('qa:edit-kb', this.showEditKbForm);
+    bus.$off('qa:delete-kb', this.handleDeleteKnowledgeBase);
+    bus.$off('qa:select', this.selectSession);
+    bus.$off('qa:rename-session', this.renameSessionFromSidebar);
+    bus.$off('qa:delete-session', this.handleDeleteSession);
   },
   methods: {
+    // 同步侧边栏共享状态(知识库/会话列表与当前会话)
+    syncSidebarState() {
+      chatState.qa.knowledgeBases = this.knowledgeBases;
+      chatState.qa.activeSession = this.activeSession;
+    },
+    // 侧边栏「新对话」:优先在第一个知识库下新建会话,无知识库则打开新建表单
+    handleNewChatRequest() {
+      if (this.knowledgeBases.length > 0) {
+        this.handleAddSession(this.knowledgeBases[0].id);
+      } else {
+        this.addKnowledgeBase();
+      }
+    },
+    // 侧边栏添加会话:先确保该知识库的会话列表已加载
+    async handleAddSession(kbId) {
+      const kb = this.knowledgeBases.find(k => k.id === kbId);
+      if (kb && kb.sessions.length === 0) {
+        await this.loadKnowledgeBaseSessions(kbId);
+      }
+      this.addSession(kbId);
+    },
+    // 侧边栏行内重命名会话
+    renameSessionFromSidebar(kbId, sessionId, newName) {
+      this.editSessionKbId = kbId;
+      this.editSessionId = sessionId;
+      this.editSessionForm.name = newName;
+      this.submitEditSessionForm();
+    },
+    // 输入框自动增高
+    autoResize(e) {
+      const el = e.target;
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    },
     // 加载可用 skill 列表（mcp-skill-service 经 blog-agent 转发）
     async loadSkills() {
       try {
@@ -2333,5 +2363,48 @@ export default {
 		transform: translateX(-50%);
 		max-width: 90%;
 	}
+}
+
+/* ===== ChatGPT 风格覆盖:强调色统一为绿色系 ===== */
+.m-skill-item:hover {
+	border-color: #10a37f;
+	background-color: rgba(16, 163, 127, 0.05);
+}
+
+.m-skill-item.active {
+	border-color: #10a37f;
+	background-color: rgba(16, 163, 127, 0.08);
+}
+
+.m-skill-confirm {
+	background-color: #10a37f;
+}
+
+.m-skill-confirm:hover {
+	background-color: #0b7a61;
+}
+
+.m-upload-btn {
+	background-color: #10a37f;
+}
+
+.m-upload-btn:hover {
+	background-color: #0b7a61;
+}
+
+.m-upload-tab-active {
+	color: #10a37f !important;
+	border-bottom-color: #10a37f !important;
+}
+
+.m-upload-dropzone-active {
+	border-color: #10a37f;
+	background-color: rgba(16, 163, 127, 0.05);
+}
+
+.m-form-input:focus,
+.m-form-textarea:focus {
+	border-color: #10a37f;
+	box-shadow: 0 0 0 2px rgba(16, 163, 127, 0.1);
 }
 </style>

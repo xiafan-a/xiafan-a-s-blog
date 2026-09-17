@@ -1,187 +1,146 @@
 <template>
-	<div class="m-page">
-		<div class="m-deepseek-container">
-			<!-- 右侧对话区域 -->
-			<div class="m-deepseek-main">
-				<!-- 顶部标签栏 -->
-				<div class="m-agent-header" ref="headerRef">
-					<span class="m-agent-title">{{ sessionName || '智能体' }}</span>
-					<div class="m-agent-actions">
-						<button
-							class="m-agent-btn m-agent-skill-btn"
-							:class="{ 'm-agent-skill-btn-active': activeSessionSkills.length > 0 }"
-							:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
-							:disabled="!activeSessionId || skillLoading"
-							@click="openSkillDialog"
-						>
-							<span>🧩</span>
-						</button>
-						<button class="m-agent-btn" @click="createNewSession" title="新建对话">
-							<span>+</span>
-						</button>
-						<button class="m-agent-btn" @click="toggleHistoryDialog" title="历史会话">
-							<span>📜</span>
-						</button>
-					</div>
-					<!-- 历史会话下拉列表 -->
-					<div class="m-history-dropdown" v-if="showHistoryDialog" ref="dropdownRef">
-						<div class="m-history-content">
-							<div class="m-history-search">
-								<input
-									type="text"
-									v-model="searchKeyword"
-									placeholder="搜索会话..."
-									class="m-history-search-input"
-								/>
-							</div>
-							<div class="m-history-list">
-								<div v-if="filteredHistorySessions.length === 0" class="m-history-empty">
-									{{ searchKeyword ? '未找到匹配的会话' : '暂无历史会话' }}
-								</div>
-								<div
-									v-for="session in filteredHistorySessions"
-									:key="session.id"
-									class="m-history-item"
-									:class="{ active: session.id === activeSessionId }"
-									@click="selectHistorySession(session)"
-								>
-									<div class="m-history-item-content">
-										<input
-											v-if="editingSessionId === session.id"
-											type="text"
-											v-model="editingSessionName"
-											class="m-history-edit-input"
-											@blur="saveSessionName(session)"
-											@keyup.enter="saveSessionName(session)"
-											@click.stop
-										/>
-										<span v-else class="m-history-name">{{ session.name || '新会话' }}</span>
-									</div>
-									<div class="m-history-item-actions">
-										<button
-											class="m-history-action-btn"
-											@click.stop="startEditSession(session)"
-											title="重命名"
-										>✏</button>
-										<button
-											class="m-history-action-btn m-history-delete-btn"
-											@click.stop="deleteSession(session)"
-											title="删除"
-										>×</button>
-									</div>
-								</div>
-							</div>
-						</div>
-					</div>
+	<div class="chat-page">
+		<!-- 消息区域 -->
+		<div class="chat-scroll" ref="chatArea" @scroll="handleChatScroll">
+			<!-- 空状态 -->
+			<div class="chat-empty" v-if="messages.length === 0">
+				<div class="chat-empty-logo">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<rect x="4" y="7" width="16" height="13" rx="2"/>
+						<path d="M12 7V4"/>
+						<path d="M9 4h6"/>
+						<line x1="9" y1="12" x2="9" y2="12.01"/>
+						<line x1="15" y1="12" x2="15" y2="12.01"/>
+						<path d="M9 16h6"/>
+					</svg>
 				</div>
-				<!-- 对话内容 -->
-				<div class="m-deepseek-chat-area" ref="chatArea" @scroll="handleChatScroll">
-					<!-- Skill 操作通知 -->
-					<div class="m-skill-notification" v-if="skillNotification" :class="'m-skill-notification-' + skillNotification.type">
-						{{ skillNotification.title }}：{{ skillNotification.message }}
-					</div>
-					<div class="m-deepseek-message" v-for="(message, msgIndex) in messages" :key="msgIndex">
-						<div class="m-deepseek-message-content" :class="{user: message.isUser}">
-							<div class="m-deepseek-message-header" v-if="message.isUser">
-								<span>我</span>
+				<h2>有什么可以帮您？</h2>
+				<p>智能体会自主规划步骤、调用工具并给出回答,在左侧选择会话或直接输入</p>
+			</div>
+
+			<!-- 消息列表 -->
+			<div class="chat-inner" v-else>
+				<!-- Skill 操作通知 -->
+				<div class="m-skill-notification" v-if="skillNotification" :class="'m-skill-notification-' + skillNotification.type">
+					{{ skillNotification.title }}：{{ skillNotification.message }}
+				</div>
+
+				<div class="msg-row" v-for="(message, msgIndex) in messages" :key="msgIndex" :class="{user: message.isUser}">
+					<!-- 用户消息:右侧气泡 -->
+					<div class="msg-bubble" v-if="message.isUser" v-html="message.content"></div>
+					<!-- 助手消息:头像 + 思考步骤 + Markdown -->
+					<template v-else>
+						<div class="msg-avatar">
+							<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+								<rect x="4" y="7" width="16" height="13" rx="2"/>
+								<path d="M12 7V4"/>
+								<path d="M9 4h6"/>
+								<line x1="9" y1="12" x2="9" y2="12.01"/>
+								<line x1="15" y1="12" x2="15" y2="12.01"/>
+								<path d="M9 16h6"/>
+							</svg>
+						</div>
+						<div class="msg-content">
+							<!-- 思考中动画 -->
+							<div class="md-body md-thinking" v-if="!message.content && !message.done">
+								<span class="m-thinking-text">思考中</span>
+								<span class="m-thinking-dots">
+									<span class="m-dot"></span>
+									<span class="m-dot"></span>
+									<span class="m-dot"></span>
+								</span>
 							</div>
-							<div class="m-deepseek-message-header" v-else>
-								<span>智能体</span>
-								<span class="m-deepseek-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</span>
-							</div>
-							<!-- 用户消息直接显示内容 -->
-							<div class="m-deepseek-message-body" v-if="message.isUser">
-								<div v-html="message.content"></div>
-							</div>
-							<!-- AI消息：先显示思考动画，再显示步骤，最后显示最终内容 -->
-							<div v-else>
-								<!-- 思考中动画 -->
-								<div class="m-deepseek-message-body m-deepseek-thinking" v-if="!message.content && !message.done">
-									<span class="m-thinking-text">思考中</span>
-									<span class="m-thinking-dots">
-										<span class="m-dot"></span>
-										<span class="m-dot"></span>
-										<span class="m-dot"></span>
-									</span>
-								</div>
-								<!-- 步骤：按思考分组折叠展示 -->
-								<div class="m-step-group-list" v-if="message.steps && message.steps.length > 0">
-									<div v-for="group in getStepGroups(message)" :key="group.key" class="m-step-group-item">
-										<!-- 折叠头部：默认折叠，展示思考摘要 / 调用工具 -->
-										<div class="m-step-group-head" @click="toggleGroup(message, group)">
-											<span class="m-step-group-chevron">{{ group.expanded ? '▼' : '▶' }}</span>
-											<span class="m-step-group-label">{{ groupSummary(group) }}</span>
-										</div>
-										<!-- 展开后的详细内容 -->
-										<div v-if="group.expanded" class="m-step-group-body">
-											<div v-if="group.thought" class="m-step-card m-step-card-thought">
-												<div class="m-step-status">
-													<span class="m-step-status-text">思考内容</span>
-												</div>
-												<div class="m-step-card-content">
-													<div class="m-step-type-label">思考内容</div>
-													<div class="m-step-detail" v-html="parseMarkdown(group.thought.content)"></div>
-												</div>
+							<!-- 步骤：按思考分组折叠展示 -->
+							<div class="m-step-group-list" v-if="message.steps && message.steps.length > 0">
+								<div v-for="group in getStepGroups(message)" :key="group.key" class="m-step-group-item">
+									<!-- 折叠头部：默认折叠，展示思考摘要 / 调用工具 -->
+									<div class="m-step-group-head" @click="toggleGroup(message, group)">
+										<span class="m-step-group-chevron">{{ group.expanded ? '▼' : '▶' }}</span>
+										<span class="m-step-group-label">{{ groupSummary(group) }}</span>
+									</div>
+									<!-- 展开后的详细内容 -->
+									<div v-if="group.expanded" class="m-step-group-body">
+										<div v-if="group.thought" class="m-step-card m-step-card-thought">
+											<div class="m-step-status">
+												<span class="m-step-status-text">思考内容</span>
 											</div>
-											<div v-for="step in group.items" :key="step.id"
-												class="m-step-card" :class="`m-step-card-${step.type}`">
-												<div class="m-step-status">
-													<span class="m-step-status-text">{{ getStepStatus(step.type) }}</span>
-												</div>
-												<div class="m-step-card-content">
-													<div class="m-step-type-label">{{ getStepLabel(step.type) }}</div>
-													<div class="m-step-detail" v-html="parseMarkdown(step.content)"></div>
-													<!-- 可展开的详细数据 -->
-													<div v-if="step.expandableData" class="m-expandable-container">
-														<div class="m-expandable-header" @click="toggleExpand(step)">
-															<span class="m-expandable-icon">{{ step._expanded ? '▼' : '▶' }}</span>
-															<span class="m-expandable-title">查看详情 ({{ step.expandableData.results ? step.expandableData.results.length + ' 条结果' : '数据' }})</span>
-														</div>
-														<div v-if="step._expanded" class="m-expandable-content">
-															<template v-if="step.expandableData.results">
-																<div v-for="(item, idx) in step.expandableData.results" :key="idx" class="m-result-item">
-																	<div class="m-result-title"><a :href="item.url" target="_blank">{{ item.title }}</a></div>
-																	<div class="m-result-snippet">{{ item.snippet }}</div>
-																</div>
-															</template>
-															<pre v-else>{{ JSON.stringify(step.expandableData, null, 2) }}</pre>
-														</div>
+											<div class="m-step-card-content">
+												<div class="m-step-type-label">思考内容</div>
+												<div class="m-step-detail" v-html="parseMarkdown(group.thought.content)"></div>
+											</div>
+										</div>
+										<div v-for="step in group.items" :key="step.id"
+											class="m-step-card" :class="`m-step-card-${step.type}`">
+											<div class="m-step-status">
+												<span class="m-step-status-text">{{ getStepStatus(step.type) }}</span>
+											</div>
+											<div class="m-step-card-content">
+												<div class="m-step-type-label">{{ getStepLabel(step.type) }}</div>
+												<div class="m-step-detail" v-html="parseMarkdown(step.content)"></div>
+												<!-- 可展开的详细数据 -->
+												<div v-if="step.expandableData" class="m-expandable-container">
+													<div class="m-expandable-header" @click="toggleExpand(step)">
+														<span class="m-expandable-icon">{{ step._expanded ? '▼' : '▶' }}</span>
+														<span class="m-expandable-title">查看详情 ({{ step.expandableData.results ? step.expandableData.results.length + ' 条结果' : '数据' }})</span>
+													</div>
+													<div v-if="step._expanded" class="m-expandable-content">
+														<template v-if="step.expandableData.results">
+															<div v-for="(item, idx) in step.expandableData.results" :key="idx" class="m-result-item">
+																<div class="m-result-title"><a :href="item.url" target="_blank">{{ item.title }}</a></div>
+																<div class="m-result-snippet">{{ item.snippet }}</div>
+															</div>
+														</template>
+														<pre v-else>{{ JSON.stringify(step.expandableData, null, 2) }}</pre>
 													</div>
 												</div>
 											</div>
 										</div>
 									</div>
 								</div>
-								<!-- 最终内容 -->
-								<div class="m-deepseek-message-body" v-if="message.content">
-									<div v-html="parseMarkdown(message.content)"></div>
-								</div>
 							</div>
+							<!-- 最终内容 -->
+							<div class="md-body" v-if="message.content">
+								<div v-html="parseMarkdown(message.content)"></div>
+							</div>
+							<div class="msg-skill-tag" v-if="message.skills && message.skills.length" :title="'本条回答使用了 Skill：' + message.skills.join('、')">🧩 {{ message.skills.join(' / ') }}</div>
 						</div>
-					</div>
-				</div>
-
-				<!-- 输入框 -->
-				<div class="m-deepseek-input-area" v-if="activeSession">
-					<div class="m-deepseek-input-container">
-						<div class="m-deepseek-input-wrapper">
-							<textarea
-								v-model="inputMessage"
-								placeholder="输入问题..."
-								@keydown.ctrl.enter.prevent="sendMessage"
-								@keydown.meta.enter.prevent="sendMessage"
-								class="m-deepseek-input"
-								rows="3"
-								:disabled="isGenerating"
-								ref="messageInput"
-							></textarea>
-						</div>
-						<button class="m-deepseek-send-btn" @click="sendMessage" :disabled="isGenerating">
-							<span class="m-deepseek-send-btn-text">↑</span>
-						</button>
-					</div>
+					</template>
 				</div>
 			</div>
+		</div>
+
+		<!-- 输入区 -->
+		<div class="input-dock">
+			<div class="input-box">
+				<button
+					class="skill-pill"
+					:class="{active: activeSessionSkills.length > 0}"
+					:title="currentSkillDescription || '选择当前会话使用的 Skill（可多选）'"
+					:disabled="!activeSessionId || skillLoading"
+					@click="openSkillDialog"
+				>
+					<span>🧩</span>
+					<span>{{ activeSessionSkills.length ? 'Skill ×' + activeSessionSkills.length : 'Skill' }}</span>
+				</button>
+				<textarea
+					v-model="inputMessage"
+					placeholder="输入问题..."
+					@keydown.ctrl.enter.prevent="sendMessage"
+					@keydown.meta.enter.prevent="sendMessage"
+					@input="autoResize"
+					class="chat-input"
+					rows="1"
+					:disabled="isGenerating"
+					ref="messageInput"
+				></textarea>
+				<button class="send-btn" @click="sendMessage" :disabled="isGenerating" aria-label="发送">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+						<line x1="12" y1="19" x2="12" y2="5"/>
+						<polyline points="5 12 12 5 19 12"/>
+					</svg>
+				</button>
+			</div>
+			<div class="input-hint">Ctrl + Enter 发送 · AI 生成内容仅供参考</div>
 		</div>
 
 		<!-- 选择会话 Skill 弹框 -->
@@ -240,6 +199,7 @@
 <script>
 import { agentChatStream, createSession, updateSession, deleteSession, getAgentSessions, getSessionMessages, createMessage, getSkills, getSessionSkill, setSessionSkills } from '@/api/agent';
 import MarkdownIt from 'markdown-it';
+import { bus, chatState } from '@/util/chat-bus';
 
 export default {
 	name: "Agent",
@@ -286,15 +246,49 @@ export default {
 			);
 		}
 	},
+	watch: {
+		// 会话列表/当前会话变化时同步到侧边栏
+		historySessions: {
+			deep: true,
+			handler: 'syncSidebarState'
+		},
+		activeSessionId: 'syncSidebarState'
+	},
 	mounted() {
 		this.loadHistorySessions();
 		this.loadSkills();
 		document.addEventListener('click', this.handleClickOutside);
+		// 监听侧边栏事件
+		bus.$on('agent:new', this.createNewSession);
+		bus.$on('agent:select', this.selectHistorySession);
+		bus.$on('agent:rename-save', this.renameSessionFromSidebar);
+		bus.$on('agent:delete', this.deleteSession);
 	},
 	beforeDestroy() {
 		document.removeEventListener('click', this.handleClickOutside);
+		bus.$off('agent:new', this.createNewSession);
+		bus.$off('agent:select', this.selectHistorySession);
+		bus.$off('agent:rename-save', this.renameSessionFromSidebar);
+		bus.$off('agent:delete', this.deleteSession);
 	},
 	methods: {
+		// 同步侧边栏共享状态(会话列表与当前会话)
+		syncSidebarState() {
+			chatState.agent.sessions = this.historySessions;
+			chatState.agent.activeId = this.activeSessionId;
+		},
+		// 侧边栏行内重命名会话
+		renameSessionFromSidebar(session, newName) {
+			this.editingSessionId = session.id;
+			this.editingSessionName = newName;
+			this.saveSessionName(session);
+		},
+		// 输入框自动增高
+		autoResize(e) {
+			const el = e.target;
+			el.style.height = 'auto';
+			el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+		},
 		// 加载可用 skill 列表（mcp-skill-service 经 blog-agent 转发）
 		async loadSkills() {
 			try {
@@ -1761,5 +1755,77 @@ export default {
 		width: 280px;
 		right: 10px;
 	}
+}
+
+/* ===== ChatGPT 风格覆盖:扁平化步骤卡片、强调色统一为绿色系 ===== */
+.m-step-group-item {
+	border: none;
+	box-shadow: none;
+	background: #f7f7f8;
+}
+
+.m-step-group-head {
+	background: #ececf1;
+	border-radius: 12px;
+}
+
+.m-step-group-head:hover {
+	background: #e3e3e6;
+}
+
+.m-step-group-body {
+	border-top: none;
+	background: #f7f7f8;
+}
+
+.m-step-card {
+	border: none;
+	box-shadow: none;
+	background: #ffffff;
+}
+
+.m-step-card:hover {
+	box-shadow: none;
+	transform: none;
+}
+
+.m-step-card .m-step-status {
+	background: #f7f7f8;
+	border-bottom: none;
+}
+
+.m-step-card-thought .m-step-status,
+.m-step-card-action .m-step-status,
+.m-step-card-observation .m-step-status,
+.m-step-card-tool .m-step-status,
+.m-step-card-summary .m-step-status {
+	background: transparent;
+}
+
+.m-step-circle {
+	background: linear-gradient(135deg, #10a37f, #0b7a61);
+	box-shadow: none;
+}
+
+.m-step-line {
+	background: linear-gradient(180deg, #10a37f 0%, #e0e0e0 100%);
+}
+
+.m-skill-item:hover {
+	border-color: #10a37f;
+	background-color: rgba(16, 163, 127, 0.05);
+}
+
+.m-skill-item.active {
+	border-color: #10a37f;
+	background-color: rgba(16, 163, 127, 0.08);
+}
+
+.m-skill-confirm {
+	background-color: #10a37f;
+}
+
+.m-skill-confirm:hover {
+	background-color: #0b7a61;
 }
 </style>
