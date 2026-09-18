@@ -1,5 +1,6 @@
 <template>
 	<div class="chat-page">
+		<div class="chat-main">
 		<!-- 消息区域 -->
 		<div class="chat-scroll" ref="chatArea" @scroll="handleChatScroll">
 			<!-- 空状态 -->
@@ -109,26 +110,6 @@
 			</div>
 		</div>
 
-		<!-- 问题定位:右侧悬浮按钮 + 面板 -->
-		<button class="msg-nav-trigger" v-if="!showMsgNav && hasQuestions" @click="showMsgNav = true" title="问题定位">
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<line x1="8" y1="6" x2="21" y2="6"/>
-				<line x1="8" y1="12" x2="21" y2="12"/>
-				<line x1="8" y1="18" x2="21" y2="18"/>
-				<line x1="3" y1="6" x2="3.01" y2="6"/>
-				<line x1="3" y1="12" x2="3.01" y2="12"/>
-				<line x1="3" y1="18" x2="3.01" y2="18"/>
-			</svg>
-			<span>定位</span>
-		</button>
-		<message-nav
-			v-if="showMsgNav"
-			:messages="messages"
-			:active-index="activeMsgIndex"
-			@close="showMsgNav = false"
-			@locate="locateMessage"
-		/>
-
 		<!-- 输入区 -->
 		<div class="input-dock">
 			<div class="input-box">
@@ -162,6 +143,27 @@
 			</div>
 			<div class="input-hint">Ctrl + Enter 发送 · AI 生成内容仅供参考</div>
 		</div>
+		</div>
+
+		<!-- 问题定位:右侧可收缩面板(桌面端停靠、收起为细条;移动端抽屉) -->
+		<message-nav
+			:expanded="showMsgNav"
+			:messages="messages"
+			:active-index="activeMsgIndex"
+			@toggle="showMsgNav = !showMsgNav"
+			@locate="locateMessage"
+		/>
+		<button class="msg-nav-trigger" v-if="!showMsgNav && hasQuestions" @click="showMsgNav = true" title="问题定位">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="8" y1="6" x2="21" y2="6"/>
+				<line x1="8" y1="12" x2="21" y2="12"/>
+				<line x1="8" y1="18" x2="21" y2="18"/>
+				<line x1="3" y1="6" x2="3.01" y2="6"/>
+				<line x1="3" y1="12" x2="3.01" y2="12"/>
+				<line x1="3" y1="18" x2="3.01" y2="18"/>
+			</svg>
+			<span>定位</span>
+		</button>
 
 		<!-- 选择会话 Skill 弹框 -->
 		<div class="m-delete-dialog-overlay" v-if="showSkillDialog" @click.self="cancelSkillDialog">

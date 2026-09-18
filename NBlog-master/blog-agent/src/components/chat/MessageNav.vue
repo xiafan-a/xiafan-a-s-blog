@@ -1,35 +1,54 @@
 <template>
-	<div class="msg-nav">
-		<div class="msg-nav-header">
-			<span class="msg-nav-title">问题定位</span>
-			<button class="msg-nav-close" @click="$emit('close')" aria-label="关闭">
-				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-					<line x1="18" y1="6" x2="6" y2="18"/>
-					<line x1="6" y1="6" x2="18" y2="18"/>
-				</svg>
-			</button>
-		</div>
-		<div class="msg-nav-list">
-			<div class="msg-nav-empty" v-if="questions.length === 0">暂无提问</div>
-			<div
-				v-for="q in questions"
-				:key="q.index"
-				class="msg-nav-item"
-				:class="{active: q.index === activeIndex}"
-				:title="q.text"
-				@click="$emit('locate', q.index)"
-			>
-				<span class="msg-nav-seq">{{ String(q.seq).padStart(2, '0') }}</span>
-				<span class="msg-nav-text">{{ q.text }}</span>
+	<aside class="msg-nav" :class="{expanded: expanded}">
+		<!-- 收起状态:右侧细条,点击展开 -->
+		<button class="msg-nav-rail-btn" @click="$emit('toggle')" title="展开问题定位" aria-label="展开问题定位">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="8" y1="6" x2="21" y2="6"/>
+				<line x1="8" y1="12" x2="21" y2="12"/>
+				<line x1="8" y1="18" x2="21" y2="18"/>
+				<line x1="3" y1="6" x2="3.01" y2="6"/>
+				<line x1="3" y1="12" x2="3.01" y2="12"/>
+				<line x1="3" y1="18" x2="3.01" y2="18"/>
+			</svg>
+		</button>
+		<!-- 展开状态:面板主体 -->
+		<div class="msg-nav-body">
+			<div class="msg-nav-header">
+				<span class="msg-nav-title">问题定位</span>
+				<button class="msg-nav-close" @click="$emit('toggle')" title="收起" aria-label="收起">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+						<polyline points="13 17 18 12 13 7"/>
+						<polyline points="6 17 11 12 6 7"/>
+					</svg>
+				</button>
+			</div>
+			<div class="msg-nav-list">
+				<div class="msg-nav-empty" v-if="questions.length === 0">暂无提问</div>
+				<div
+					v-for="q in questions"
+					:key="q.index"
+					class="msg-nav-item"
+					:class="{active: q.index === activeIndex}"
+					:title="q.text"
+					@click="$emit('locate', q.index)"
+				>
+					<span class="msg-nav-seq">{{ String(q.seq).padStart(2, '0') }}</span>
+					<span class="msg-nav-text">{{ q.text }}</span>
+				</div>
 			</div>
 		</div>
-	</div>
+	</aside>
 </template>
 
 <script>
 	export default {
 		name: 'MessageNav',
 		props: {
+			// 是否展开(展开=停靠面板,收起=右侧细条)
+			expanded: {
+				type: Boolean,
+				default: false
+			},
 			// 消息列表(含 isUser 标记)
 			messages: {
 				type: Array,
@@ -63,32 +82,61 @@
 </script>
 
 <style scoped>
+	/* 停靠在聊天页右侧的常驻面板:收起=36px 细条,展开=264px 面板 */
 	.msg-nav {
-		position: absolute;
-		top: 10px;
-		right: 16px;
-		bottom: 110px;
-		width: 264px;
+		flex-shrink: 0;
+		width: 36px;
 		display: flex;
 		flex-direction: column;
-		background: #ffffff;
-		border: 1px solid #ececf1;
-		border-radius: 12px;
-		box-shadow: 0 8px 30px rgba(0, 0, 0, 0.1);
-		z-index: 30;
+		background: #fafafa;
+		border-left: 1px solid #ececf1;
 		overflow: hidden;
-		animation: msg-nav-in 0.18s ease;
+		transition: width 0.25s ease, background-color 0.25s ease;
 	}
 
-	@keyframes msg-nav-in {
-		from {
-			opacity: 0;
-			transform: translateX(8px);
-		}
-		to {
-			opacity: 1;
-			transform: translateX(0);
-		}
+	.msg-nav.expanded {
+		width: 264px;
+		background: #ffffff;
+	}
+
+	/* 收起状态细条上的展开按钮 */
+	.msg-nav-rail-btn {
+		flex-shrink: 0;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		width: 36px;
+		height: 36px;
+		margin-top: 10px;
+		background: none;
+		border: none;
+		border-radius: 8px;
+		color: #8f8f8f;
+		cursor: pointer;
+		transition: background-color 0.15s ease, color 0.15s ease;
+	}
+
+	.msg-nav-rail-btn:hover {
+		background-color: #ececec;
+		color: #0b7a61;
+	}
+
+	.msg-nav-rail-btn svg {
+		width: 16px;
+		height: 16px;
+	}
+
+	.msg-nav.expanded .msg-nav-rail-btn {
+		display: none;
+	}
+
+	/* 面板主体:固定 264px 宽,收起时被容器裁剪,避免内容随宽度挤压 */
+	.msg-nav-body {
+		width: 264px;
+		flex: 1;
+		min-height: 0;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.msg-nav-header {
@@ -187,5 +235,30 @@
 		-webkit-box-orient: vertical;
 		overflow: hidden;
 		word-break: break-word;
+	}
+
+	/* 移动端:细条隐藏,面板变为抽屉式覆盖层 */
+	@media (max-width: 768px) {
+		.msg-nav {
+			position: absolute;
+			top: 0;
+			right: 0;
+			bottom: 0;
+			width: 0;
+			background: transparent;
+			border-left: none;
+		}
+
+		.msg-nav.expanded {
+			width: 300px;
+			max-width: 85vw;
+			background: #ffffff;
+			border-left: 1px solid #ececf1;
+			box-shadow: -8px 0 24px rgba(0, 0, 0, 0.12);
+		}
+
+		.msg-nav-rail-btn {
+			display: none;
+		}
 	}
 </style>
