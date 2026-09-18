@@ -80,25 +80,12 @@
 		</div>
 		</div>
 
-		<!-- 问题定位:右侧可收缩面板(桌面端停靠、收起为细条;移动端抽屉) -->
+		<!-- 问题定位:DeepSeek 风格右侧横杠锚点 -->
 		<message-nav
-			:expanded="showMsgNav"
 			:messages="messages"
 			:active-index="activeMsgIndex"
-			@toggle="showMsgNav = !showMsgNav"
 			@locate="locateMessage"
 		/>
-		<button class="msg-nav-trigger" v-if="!showMsgNav && hasQuestions" @click="showMsgNav = true" title="问题定位">
-			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-				<line x1="8" y1="6" x2="21" y2="6"/>
-				<line x1="8" y1="12" x2="21" y2="12"/>
-				<line x1="8" y1="18" x2="21" y2="18"/>
-				<line x1="3" y1="6" x2="3.01" y2="6"/>
-				<line x1="3" y1="12" x2="3.01" y2="12"/>
-				<line x1="3" y1="18" x2="3.01" y2="18"/>
-			</svg>
-			<span>定位</span>
-		</button>
 
 		<!-- 确认删除弹框 -->
 		<div class="m-delete-confirm" v-if="showConfirmDialog">
@@ -364,8 +351,7 @@ export default {
       inputMessage: "",
       isGenerating: false,
       userHasScrolledUp: false,
-      // 问题定位面板
-      showMsgNav: false,
+      // 问题定位:当前滚动位置对应的用户消息索引
       activeMsgIndex: -1,
       // 确认删除弹框相关
       showConfirmDialog: false,
@@ -415,10 +401,6 @@ export default {
     }
   },
   computed: {
-    // 是否存在用户提问(决定是否显示定位按钮)
-    hasQuestions() {
-      return this.messages.some(m => m.isUser);
-    },
     currentSkillDescription() {
       const lines = this.availableSkills
         .filter(s => this.activeSessionSkills.includes(s.name))
