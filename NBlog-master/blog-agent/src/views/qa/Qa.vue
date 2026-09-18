@@ -15,7 +15,7 @@
 
 			<!-- 消息列表 -->
 			<div class="chat-inner" v-else>
-				<div class="msg-row" v-for="(message, msgIndex) in messages" :key="msgIndex" :class="{user: message.isUser}">
+				<div class="msg-row" v-for="(message, msgIndex) in messages" :key="msgIndex" :class="{user: message.isUser}" :ref="'msg-' + msgIndex">
 					<!-- 用户消息:右侧气泡 -->
 					<div class="msg-bubble" v-if="message.isUser" v-html="message.content"></div>
 					<!-- 助手消息:头像 + Markdown -->
@@ -43,6 +43,26 @@
 				</div>
 			</div>
 		</div>
+
+		<!-- 问题定位:右侧悬浮按钮 + 面板 -->
+		<button class="msg-nav-trigger" v-if="!showMsgNav && hasQuestions" @click="showMsgNav = true" title="问题定位">
+			<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+				<line x1="8" y1="6" x2="21" y2="6"/>
+				<line x1="8" y1="12" x2="21" y2="12"/>
+				<line x1="8" y1="18" x2="21" y2="18"/>
+				<line x1="3" y1="6" x2="3.01" y2="6"/>
+				<line x1="3" y1="12" x2="3.01" y2="12"/>
+				<line x1="3" y1="18" x2="3.01" y2="18"/>
+			</svg>
+			<span>定位</span>
+		</button>
+		<message-nav
+			v-if="showMsgNav"
+			:messages="messages"
+			:active-index="activeMsgIndex"
+			@close="showMsgNav = false"
+			@locate="locateMessage"
+		/>
 
 		<!-- 输入区 -->
 		<div class="input-dock">
@@ -315,9 +335,13 @@ import MarkdownIt from 'markdown-it';
 import mk from '@iktakahiro/markdown-it-katex';
 import 'katex/dist/katex.min.css';
 import { bus, chatState } from '@/util/chat-bus';
+import MessageNav from '@/components/chat/MessageNav.vue';
 
 export default {
   name: "Qa",
+  components: {
+    MessageNav
+  },
   data() {
     return {
       md: new MarkdownIt({
@@ -338,6 +362,9 @@ export default {
       inputMessage: "",
       isGenerating: false,
       userHasScrolledUp: false,
+      // 问题定位面板
+      showMsgNav: false,
+      activeMsgIndex: -1,
       // 确认删除弹框相关
       showConfirmDialog: false,
       confirmType: '', // 'knowledgeBase' 或 'session'
@@ -386,6 +413,10 @@ export default {
     }
   },
   computed: {
+    // 是否存在用户提问(决定是否显示定位按钮)
+    hasQuestions() {
+      return this.messages.some(m => m.isUser);
+    },
     currentSkillDescription() {
       const lines = this.availableSkills
         .filter(s => this.activeSessionSkills.includes(s.name))
@@ -394,6 +425,8 @@ export default {
     }
   },
   watch: {
+    // 消息列表变化后刷新定位高亮
+    messages: 'scheduleSpyUpdate',
     // 知识库/会话列表变化时同步到侧边栏
     knowledgeBases: {
       deep: true,
@@ -464,6 +497,36 @@ export default {
       const el = e.target;
       el.style.height = 'auto';
       el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+    },
+    // 问题定位:平滑滚动到指定消息
+    locateMessage(index) {
+      const refs = this.$refs['msg-' + index];
+      const el = refs && refs[0];
+      if (el && el.scrollIntoView) {
+        el.scrollIntoView({behavior: 'smooth', block: 'start'});
+      }
+      this.activeMsgIndex = index;
+    },
+    // 根据滚动位置更新当前定位的消息
+    updateActiveMessage() {
+      const container = this.$refs.chatArea;
+      if (!container) return;
+      const containerTop = container.getBoundingClientRect().top;
+      let active = -1;
+      this.messages.forEach((m, i) => {
+        if (!m.isUser) return;
+        const refs = this.$refs['msg-' + i];
+        const el = refs && refs[0];
+        if (!el) return;
+        if (el.getBoundingClientRect().top - containerTop <= 120) {
+          active = i;
+        }
+      });
+      this.activeMsgIndex = active;
+    },
+    // 消息渲染完成后刷新定位高亮
+    scheduleSpyUpdate() {
+      this.$nextTick(() => this.updateActiveMessage());
     },
     // 加载可用 skill 列表（mcp-skill-service 经 blog-agent 转发）
     async loadSkills() {
@@ -629,6 +692,7 @@ export default {
         const isAtBottom = chatArea.scrollHeight - chatArea.scrollTop - chatArea.clientHeight < 50;
         this.userHasScrolledUp = !isAtBottom;
       }
+      this.updateActiveMessage();
     },
     // 显示添加知识库表单
     addKnowledgeBase() {
