@@ -1,17 +1,18 @@
 <template>
 	<div class="msg-nav" v-if="questions.length > 0">
-		<div
-			v-for="q in questions"
-			:key="q.index"
-			class="msg-nav-bar"
-			:class="{active: q.index === activeIndex}"
-			@click="$emit('locate', q.index)"
-			@mouseenter="hoverIndex = q.index"
-			@mouseleave="hoverIndex = -1"
-		>
-			<!-- 悬停弹框:预览问题内容(过长截断) -->
-			<div class="msg-nav-pop" v-if="hoverIndex === q.index">{{ q.text }}</div>
+		<div class="msg-nav-list">
+			<div
+				v-for="q in questions"
+				:key="q.index"
+				class="msg-nav-bar"
+				:class="{active: q.index === activeIndex}"
+				@click="$emit('locate', q.index)"
+				@mouseenter="onBarEnter(q, $event)"
+				@mouseleave="onBarLeave"
+			></div>
 		</div>
+		<!-- 悬停弹框:预览问题内容(过长截断);挂在列表外层,避免被滚动容器裁剪 -->
+		<div class="msg-nav-pop" v-if="hoverText" :style="popStyle">{{ hoverText }}</div>
 	</div>
 </template>
 
@@ -32,7 +33,8 @@
 		},
 		data() {
 			return {
-				hoverIndex: -1
+				hoverIndex: -1,
+				popTop: 0
 			}
 		},
 		computed: {
@@ -49,13 +51,37 @@
 					result.push({index, text: text || '(空内容)'})
 				})
 				return result
+			},
+			// 悬停横杠对应的问题摘要
+			hoverText() {
+				const q = this.questions.find(item => item.index === this.hoverIndex)
+				return q ? q.text : ''
+			},
+			// 弹框垂直位置:对准悬停的横杠
+			popStyle() {
+				return {top: this.popTop + 'px'}
+			}
+		},
+		methods: {
+			// 悬停横杠:记录索引并计算弹框位置
+			onBarEnter(q, event) {
+				this.hoverIndex = q.index
+				const bar = event.currentTarget
+				const barRect = bar.getBoundingClientRect()
+				const navRect = this.$el.getBoundingClientRect()
+				// 弹框中心对准横杠中心,并防止超出视口顶部
+				this.popTop = Math.max(barRect.top + barRect.height / 2 - navRect.top, 50)
+			},
+			// 离开横杠:隐藏弹框
+			onBarLeave() {
+				this.hoverIndex = -1
 			}
 		}
 	}
 </script>
 
 <style scoped>
-	/* DeepSeek 风格:右侧垂直居中的横杠锚点列 */
+	/* DeepSeek 风格:右侧垂直居中的横杠锚点列(容器不裁剪,弹框可溢出显示) */
 	.msg-nav {
 		position: absolute;
 		right: 8px;
@@ -64,14 +90,21 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
+		z-index: 24;
+	}
+
+	/* 横杠列表:提问过多时限高滚动 */
+	.msg-nav-list {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-end;
 		gap: 8px;
 		max-height: 60vh;
 		overflow-y: auto;
 		padding: 4px 2px;
-		z-index: 24;
 	}
 
-	.msg-nav::-webkit-scrollbar {
+	.msg-nav-list::-webkit-scrollbar {
 		width: 0;
 	}
 
@@ -107,11 +140,10 @@
 		background-color: #10a37f;
 	}
 
-	/* 悬停弹框:显示问题内容摘要 */
+	/* 悬停弹框:显示问题内容摘要,位于横杠左侧 */
 	.msg-nav-pop {
 		position: absolute;
 		right: calc(100% + 10px);
-		top: 50%;
 		transform: translateY(-50%);
 		width: max-content;
 		max-width: 280px;
