@@ -51,6 +51,18 @@ export function uploadImage(file) {
 	}).then(res => res.data)
 }
 
+//上传实况照片（单个 HEIC，后端拆分为静态图 + 视频），返回上传成功后的 Image
+export function uploadLiveImage(file) {
+	const formData = new FormData()
+	formData.append('file', file)
+	return request({
+		url: 'live',
+		method: 'post',
+		data: formData,
+		headers: {'Content-Type': 'multipart/form-data'}
+	}).then(res => res.data)
+}
+
 //按id查询图片
 export function getImageById(id) {
 	return request({
