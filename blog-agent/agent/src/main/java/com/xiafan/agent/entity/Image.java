@@ -28,6 +28,15 @@ public class Image {
     private Integer width;
     @TableField("height")
     private Integer height;
+    /** id of the associated video row in the images table (Live Photo), or null when none. */
+    @TableField("video_image_id")
+    private Integer videoImageId;
+    /** 1 when this image has an associated video (Live Photo), else 0. */
+    @TableField("has_video")
+    private Integer hasVideo = 0;
+    /** Not persisted; populated with the video's public URL when a Live Photo is read. */
+    @TableField(exist = false)
+    private String videoUrl;
     /** Not persisted; populated with a fresh presigned URL when the row is read. */
     @TableField(exist = false)
     private String url;

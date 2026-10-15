@@ -35,6 +35,12 @@ public class ImageController {
         return imageService.uploadImage(file);
     }
 
+    /** Uploads a Live Photo as a single HEIC file; the backend splits it into still + video. */
+    @PostMapping("/live")
+    public Image uploadLive(@RequestParam("file") MultipartFile file) {
+        return imageService.uploadLiveImage(file);
+    }
+
     @GetMapping("/{id}")
     public Image get(@PathVariable int id) {
         return imageService.getImage(id);

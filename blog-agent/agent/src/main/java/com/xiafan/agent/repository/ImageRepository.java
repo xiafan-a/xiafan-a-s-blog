@@ -12,7 +12,7 @@ import java.util.Optional;
 public interface ImageRepository extends BaseMapper<Image> {
 
     default Image insert(String imageName, String originalName, int fileSize, String contentType,
-                         Integer width, Integer height) {
+                         Integer width, Integer height, Integer videoImageId, Integer hasVideo) {
         Image image = new Image();
         image.setImageName(imageName);
         image.setOriginalName(originalName);
@@ -20,6 +20,8 @@ public interface ImageRepository extends BaseMapper<Image> {
         image.setContentType(contentType);
         image.setWidth(width);
         image.setHeight(height);
+        image.setVideoImageId(videoImageId);
+        image.setHasVideo(hasVideo == null ? 0 : hasVideo);
         insert(image);
         return findById(image.getId()).orElseThrow();
     }
@@ -39,6 +41,8 @@ public interface ImageRepository extends BaseMapper<Image> {
     default List<Image> findAll(int skip, int limit) {
         return selectList(new LambdaQueryWrapper<Image>()
                 .eq(Image::getIsDeleted, 0)
+                // only list actual images, not the video rows that back Live Photos
+                .likeRight(Image::getContentType, "image/")
                 .orderByDesc(Image::getCreatedAt)
                 .last("LIMIT " + limit + " OFFSET " + skip));
     }

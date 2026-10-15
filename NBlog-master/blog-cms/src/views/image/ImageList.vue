@@ -10,16 +10,43 @@
 					style="display: inline-block">
 				<el-button type="primary" size="small" icon="el-icon-upload2" :loading="uploading">上传图片</el-button>
 			</el-upload>
+			<el-button type="warning" size="small" icon="el-icon-video-camera" style="margin-left: 8px"
+			           @click="openLiveDialog">上传实况照片</el-button>
 			<span class="tip">支持 jpg / png / gif / webp 等格式，支持多选</span>
 		</el-card>
+
+		<!--实况照片上传弹窗：单个 HEIC，后端拆分-->
+		<el-dialog title="上传实况照片 (Live Photo)" :visible.sync="liveDialogVisible" width="480px"
+		           :close-on-click-modal="false" @closed="resetLiveDialog">
+			<el-form label-width="90px">
+				<el-form-item label="HEIC 文件" required>
+					<el-upload ref="liveUpload" :auto-upload="false" :limit="1"
+					           accept=".heic,.heif,image/heic,image/heif"
+					           :on-change="onLiveFileChange" :on-remove="onLiveFileRemove" action="#">
+						<el-button size="small">选择 .heic 文件</el-button>
+					</el-upload>
+				</el-form-item>
+			</el-form>
+			<div class="live-tip">从「文件」App 上传实况照片导出的 .heic 文件，后端会自动拆分出静态图和视频。</div>
+			<span slot="footer" class="dialog-footer">
+				<el-button size="small" @click="liveDialogVisible = false">取消</el-button>
+				<el-button type="primary" size="small" :loading="uploading"
+				           :disabled="!liveFile" @click="submitLive">上传</el-button>
+			</span>
+		</el-dialog>
 
 		<!--图片列表-->
 		<div v-loading="loading" class="grid-wrap">
 			<el-row :gutter="10" v-viewer>
 				<el-col v-for="item in images" :key="item.id" :xs="12" :sm="8" :md="6" :lg="4">
 					<el-card :body-style="{padding: '0px', width: '100%'}" class="img-card" shadow="hover">
-						<div class="thumb-wrap">
-							<el-image :src="item.url" fit="cover" class="thumb" lazy>
+						<div class="thumb-wrap" @mouseenter="playLive" @mouseleave="pauseLive">
+							<template v-if="item.has_video">
+								<img :src="item.url" class="thumb" alt="">
+								<video v-if="item.video_url" :src="item.video_url" class="thumb live-video" muted loop playsinline preload="none"></video>
+								<span class="live-badge">LIVE</span>
+							</template>
+							<el-image v-else :src="item.url" fit="cover" class="thumb" lazy>
 								<div slot="error" class="thumb-error"><i class="el-icon-picture-outline"></i></div>
 							</el-image>
 						</div>
@@ -49,7 +76,7 @@
 
 <script>
 	import moment from 'moment'
-	import {getImages, uploadImage, deleteImage} from '@/api/image'
+	import {getImages, uploadImage, uploadLiveImage, deleteImage} from '@/api/image'
 
 	export default {
 		name: "ImageList",
@@ -61,7 +88,9 @@
 				hasMore: true,
 				loading: false,
 				loadingMore: false,
-				uploading: false
+				uploading: false,
+				liveDialogVisible: false,
+				liveFile: null
 			}
 		},
 		created() {
@@ -99,6 +128,44 @@
 				}).catch(() => {
 					this.uploading = false
 				})
+			},
+			openLiveDialog() {
+				this.liveDialogVisible = true
+				this.$nextTick(() => {
+					if (this.$refs.liveUpload) this.$refs.liveUpload.clearFiles()
+				})
+			},
+			onLiveFileChange(file) {
+				this.liveFile = file.raw
+			},
+			onLiveFileRemove() {
+				this.liveFile = null
+			},
+			submitLive() {
+				if (!this.liveFile) return
+				this.uploading = true
+				uploadLiveImage(this.liveFile).then(() => {
+					this.msgSuccess('上传成功')
+					this.liveDialogVisible = false
+					this.getImages()
+					this.uploading = false
+				}).catch(() => {
+					this.uploading = false
+				})
+			},
+			resetLiveDialog() {
+				this.liveFile = null
+			},
+			playLive(e) {
+				const video = e.currentTarget.querySelector('video')
+				if (video) video.play().catch(() => {})
+			},
+			pauseLive(e) {
+				const video = e.currentTarget.querySelector('video')
+				if (video) {
+					video.pause()
+					video.currentTime = 0
+				}
 			},
 			deleteImageById(item) {
 				deleteImage(item.id).then(() => {
@@ -156,6 +223,7 @@
 	}
 
 	.thumb-wrap {
+		position: relative;
 		height: 140px;
 		overflow: hidden;
 		cursor: zoom-in;
@@ -166,6 +234,41 @@
 		width: 100%;
 		height: 100%;
 		display: block;
+	}
+
+	.live-video {
+		position: absolute;
+		top: 0;
+		left: 0;
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+		opacity: 0;
+		transition: opacity .2s;
+		pointer-events: none;
+	}
+
+	.thumb-wrap:hover .live-video {
+		opacity: 1;
+	}
+
+	.live-badge {
+		position: absolute;
+		top: 6px;
+		right: 6px;
+		padding: 2px 6px;
+		font-size: 11px;
+		color: #fff;
+		background: rgba(0, 0, 0, .55);
+		border-radius: 3px;
+		letter-spacing: 1px;
+		pointer-events: none;
+	}
+
+	.live-tip {
+		font-size: 12px;
+		color: #909399;
+		margin-bottom: 8px;
 	}
 
 	.thumb-error {
