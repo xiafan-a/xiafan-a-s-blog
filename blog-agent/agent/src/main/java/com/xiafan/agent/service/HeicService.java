@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.xiafan.agent.common.BusinessException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -29,6 +30,12 @@ public class HeicService {
 
     private static final Logger log = LoggerFactory.getLogger(HeicService.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** ffmpeg/ffprobe binary paths, overridable for machines where they aren't on PATH. */
+    @Value("${app.ffmpeg.path:ffmpeg}")
+    private String ffmpegPath;
+    @Value("${app.ffmpeg.probe-path:ffprobe}")
+    private String ffprobePath;
 
     /** Fewer frames than this means there is no real motion sequence (just a plain HEIC still). */
     private static final int MIN_VIDEO_FRAMES = 5;
@@ -77,7 +84,7 @@ public class HeicService {
 
     private List<StreamInfo> probeStreams(Path in) {
         byte[] json = runCommand(List.of(
-                "ffprobe", "-v", "error",
+                ffprobePath, "-v", "error",
                 "-show_entries", "stream=index,codec_type,width,height",
                 "-of", "json", in.toString()));
         if (json == null) {
@@ -131,7 +138,7 @@ public class HeicService {
 
     private byte[] extractStill(Path in, Path dir, StreamInfo still) {
         Path out = dir.resolve("still.jpg");
-        if (runCommand(List.of("ffmpeg", "-v", "error", "-y", "-i", in.toString(),
+        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
                 "-map", "0:v:" + still.index(), "-frames:v", "1", "-q:v", "2", out.toString())) == null) {
             return null;
         }
@@ -141,7 +148,7 @@ public class HeicService {
     /** Re-muxes the selected video frames (in stream order) into a single MP4. */
     private byte[] buildVideo(Path in, Path dir, List<StreamInfo> videoStreams) {
         // one ffmpeg call dumps every stream's single frame as frame_0001.jpg.. in stream order
-        if (runCommand(List.of("ffmpeg", "-v", "error", "-y", "-i", in.toString(),
+        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
                 "-map", "0:v", "-frames:v", "1", "-q:v", "2",
                 dir.resolve("frame_%04d.jpg").toString())) == null) {
             return null;
@@ -160,7 +167,7 @@ public class HeicService {
         }
         int fps = (int) Math.round(Math.max(10.0, Math.min(30.0, videoStreams.size() / LIVE_PHOTO_SECONDS)));
         Path out = dir.resolve("video.mp4");
-        if (runCommand(List.of("ffmpeg", "-v", "error", "-y", "-framerate", String.valueOf(fps),
+        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-framerate", String.valueOf(fps),
                 "-i", dir.resolve("seq_%04d.jpg").toString(),
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 out.toString())) == null) {
@@ -194,10 +201,23 @@ public class HeicService {
                 return null;
             }
             return output;
+        } catch (IOException e) {
+            if (executableNotFound(e)) {
+                throw new BusinessException(500, "服务器未安装 " + cmd.get(0) + "（处理实况照片需要 ffmpeg/ffprobe），请安装后重试");
+            }
+            log.warn("ffmpeg command failed: {}", e.getMessage());
+            return null;
         } catch (Exception e) {
             log.warn("ffmpeg command failed: {}", e.getMessage());
             return null;
         }
+    }
+
+    /** True when the executable itself is missing (not a decode failure). */
+    private static boolean executableNotFound(IOException e) {
+        String m = e.getMessage();
+        return m != null && (m.contains("error=2") || m.contains("No such file or directory")
+                || m.contains("CreateProcess error=2"));
     }
 
     private static void deleteRecursively(Path dir) {
