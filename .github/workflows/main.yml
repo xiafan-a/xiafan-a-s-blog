@@ -6,9 +6,51 @@ on:
   workflow_dispatch:
 
 jobs:
-  build-frontend:
-    name: Build Vue Frontend
+  # 检测哪些服务有代码变更（增量构建的核心）
+  changes:
+    name: Detect changed services
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      cms: ${{ steps.filter.outputs.cms }}
+      view: ${{ steps.filter.outputs.view }}
+      agent_frontend: ${{ steps.filter.outputs.agent_frontend }}
+      blog_api: ${{ steps.filter.outputs.blog_api }}
+      agent_backend: ${{ steps.filter.outputs.agent_backend }}
+      mcp: ${{ steps.filter.outputs.mcp }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # 需要历史记录来对比变更
+
+      # 手动触发时没有 before SHA 无法对比，跳过该步骤（手动触发默认全量构建）
+      - name: Filter changed paths
+        if: github.event_name != 'workflow_dispatch'
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cms:
+              - 'NBlog-master/blog-cms/**'
+            view:
+              - 'NBlog-master/blog-view/**'
+            agent_frontend:
+              - 'NBlog-master/blog-agent/**'
+            blog_api:
+              - 'blog-api/**'
+            agent_backend:
+              - 'blog-agent/**'
+            mcp:
+              - 'mcp-skill-service/**'
+
+  build-cms:
+    name: Build blog-cms (Vue)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.cms == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,31 +66,72 @@ jobs:
           npm install --no-audit --no-fund
           npm run build
 
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cms-dist
+          path: NBlog-master/blog-cms/dist
+          retention-days: 3
+
+  build-view:
+    name: Build blog-view (Vue)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.view == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Build blog-view
         working-directory: ./NBlog-master/blog-view
         run: |
           npm install --no-audit --no-fund
           npm run build
 
-      - name: Build blog-agent
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: view-dist
+          path: NBlog-master/blog-view/dist
+          retention-days: 3
+
+  build-agent-frontend:
+    name: Build blog-agent frontend (Vue)
+    runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.agent_frontend == 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build blog-agent frontend
         working-directory: ./NBlog-master/blog-agent
         run: |
           npm install --no-audit --no-fund
           npm run build
 
-      - name: Upload artifacts
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: frontend-dist
-          path: |
-            NBlog-master/blog-cms/dist
-            NBlog-master/blog-view/dist
-            NBlog-master/blog-agent/dist
+          name: agent-frontend-dist
+          path: NBlog-master/blog-agent/dist
           retention-days: 3
 
-  build-java:
-    name: Build Java Backend
+  build-blog-api:
+    name: Build blog-api (Java 8)
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.blog_api == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,9 +153,11 @@ jobs:
           path: blog-api/target/*.jar
           retention-days: 3
 
-  build-agent:
-    name: Build Blog Agent
+  build-agent-backend:
+    name: Build blog-agent backend (Java 17)
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.agent_backend == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -94,9 +179,11 @@ jobs:
           path: blog-agent/agent/target/*.jar
           retention-days: 3
 
-  build-mcp-skill-service:
-    name: Build MCP Skill Service
+  build-mcp:
+    name: Build MCP Skill Service (Java 17)
     runs-on: ubuntu-latest
+    needs: changes
+    if: github.event_name == 'workflow_dispatch' || needs.changes.outputs.mcp == 'true'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -120,10 +207,10 @@ jobs:
 
   deploy:
     name: Deploy to Server
-    needs: [build-frontend, build-java, build-agent, build-mcp-skill-service]
+    needs: [build-cms, build-view, build-agent-frontend, build-blog-api, build-agent-backend, build-mcp]
     runs-on: ubuntu-latest
     environment: host
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' && !cancelled() && (needs.build-cms.result == 'success' || needs.build-view.result == 'success' || needs.build-agent-frontend.result == 'success' || needs.build-blog-api.result == 'success' || needs.build-agent-backend.result == 'success' || needs.build-mcp.result == 'success')
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -138,51 +225,80 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.SERVER_SSH_KEY }}
 
-      - name: Deploy Frontend
+      - name: Deploy blog-cms frontend
+        if: needs.build-cms.result == 'success'
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          # 添加 -o StrictHostKeyChecking=no 参数
+          DIST=$(find artifacts/cms-dist -type d -name dist -print -quit)
+          DIST=${DIST:-artifacts/cms-dist}
           rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
-            artifacts/frontend-dist/blog-cms/dist/ \
+            "$DIST/" \
             $SERVER_USER@$SERVER_HOST:/root/blog/frontend/cms/dist/
 
-          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
-            artifacts/frontend-dist/blog-view/dist/ \
-            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/view/dist/
-
-          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
-            artifacts/frontend-dist/blog-agent/dist/ \
-            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/agent/dist/
-
-          # SSH 命令也添加相同参数
-          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker exec blog-nginx nginx -s reload"
-
-      - name: Deploy Java
+      - name: Deploy blog-view frontend
+        if: needs.build-view.result == 'success'
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
-          scp -o StrictHostKeyChecking=no artifacts/java-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-api-0.0.1.jar
+          DIST=$(find artifacts/view-dist -type d -name dist -print -quit)
+          DIST=${DIST:-artifacts/view-dist}
+          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
+            "$DIST/" \
+            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/view/dist/
+
+      - name: Deploy blog-agent frontend
+        if: needs.build-agent-frontend.result == 'success'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          DIST=$(find artifacts/agent-frontend-dist -type d -name dist -print -quit)
+          DIST=${DIST:-artifacts/agent-frontend-dist}
+          rsync -av --delete -e "ssh -o StrictHostKeyChecking=no" \
+            "$DIST/" \
+            $SERVER_USER@$SERVER_HOST:/root/blog/frontend/agent/dist/
+
+      - name: Reload Nginx
+        if: needs.build-cms.result == 'success' || needs.build-view.result == 'success' || needs.build-agent-frontend.result == 'success'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker exec blog-nginx nginx -s reload"
+
+      - name: Deploy blog-api (Java)
+        if: needs.build-blog-api.result == 'success'
+        env:
+          SERVER_HOST: ${{ secrets.SERVER_HOST }}
+          SERVER_USER: ${{ secrets.SERVER_USER }}
+        run: |
+          JAR=$(find artifacts/java-jar -name '*.jar' -print -quit)
+          scp -o StrictHostKeyChecking=no "$JAR" $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-api-0.0.1.jar
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-java"
 
-      - name: Deploy Agent
+      - name: Deploy blog-agent backend (Java)
+        if: needs.build-agent-backend.result == 'success'
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/backend/java/blog-agent"
-          scp -o StrictHostKeyChecking=no artifacts/blog-agent-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
+          JAR=$(find artifacts/blog-agent-jar -name '*.jar' -print -quit)
+          scp -o StrictHostKeyChecking=no "$JAR" $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent.0.0.1.jar
           scp -o StrictHostKeyChecking=no blog-agent/Dockerfile $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/blog-agent/Dockerfile
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart blog-agent"
 
-      - name: Deploy MCP Skill Service
+      - name: Deploy MCP Skill Service (Java)
+        if: needs.build-mcp.result == 'success'
         env:
           SERVER_HOST: ${{ secrets.SERVER_HOST }}
           SERVER_USER: ${{ secrets.SERVER_USER }}
         run: |
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "mkdir -p /root/blog/backend/java/mcp-skill-service"
-          scp -o StrictHostKeyChecking=no artifacts/mcp-skill-service-jar/*.jar $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/mcp-skill-service.jar
+          JAR=$(find artifacts/mcp-skill-service-jar -name '*.jar' -print -quit)
+          scp -o StrictHostKeyChecking=no "$JAR" $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/mcp-skill-service.jar
           scp -o StrictHostKeyChecking=no mcp-skill-service/Dockerfile $SERVER_USER@$SERVER_HOST:/root/blog/backend/java/mcp-skill-service/Dockerfile
           ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST "docker restart mcp-skill-service"
