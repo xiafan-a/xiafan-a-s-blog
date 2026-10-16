@@ -60,6 +60,10 @@ public class HeicService {
             dir = Files.createTempDirectory("heic-extract-");
             Path in = dir.resolve("input.heic");
             Files.write(in, heic);
+            log.info("HEIC upload: {} bytes, magic={}", heic.length, magicHex(heic));
+            if (!looksLikeHeif(heic)) {
+                throw new BusinessException(400, "上传的文件不是有效的 HEIC/HEIF（请通过 iOS「文件」App 选择原始 .heic 文件，而不是从相册选择）");
+            }
 
             List<StreamInfo> streams = probeStreams(in);
             if (streams.isEmpty()) {
@@ -147,21 +151,15 @@ public class HeicService {
 
     /** Re-muxes the selected video frames (in stream order) into a single MP4. */
     private byte[] buildVideo(Path in, Path dir, List<StreamInfo> videoStreams) {
-        // one ffmpeg call dumps every stream's single frame as frame_0001.jpg.. in stream order
-        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
-                "-map", "0:v", "-frames:v", "1", "-q:v", "2",
-                dir.resolve("frame_%04d.jpg").toString())) == null) {
-            return null;
-        }
-        // keep only the video frames, renamed into a contiguous sequence for the image2 demuxer
+        // Decode one frame per selected stream. A single bulk "-map 0:v" pass opens every HEVC
+        // decoder at once and gets OOM-killed (exit 137) on memory-limited containers, so we decode
+        // one stream at a time to keep peak memory low.
         int k = 0;
         for (StreamInfo s : videoStreams) {
-            Path src = dir.resolve(String.format("frame_%04d.jpg", s.index() + 1));
-            Path dst = dir.resolve(String.format("seq_%04d.jpg", ++k));
-            try {
-                Files.copy(src, dst);
-            } catch (IOException e) {
-                log.warn("frame copy failed: {}", e.getMessage());
+            Path frame = dir.resolve(String.format("seq_%04d.jpg", ++k));
+            if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
+                    "-map", "0:v:" + s.index(), "-frames:v", "1", "-q:v", "2",
+                    frame.toString())) == null) {
                 return null;
             }
         }
@@ -197,6 +195,11 @@ public class HeicService {
                 return null;
             }
             if (p.exitValue() != 0) {
+                if (p.exitValue() == 137) {
+                    log.error("ffmpeg was killed (exit 137, likely OOM). Container memory limit is too low "
+                            + "to decode this HEIC's many HEVC streams. Raise the container memory "
+                            + "(docker run -m / compose mem_limit) or decode frames one at a time.");
+                }
                 log.warn("ffmpeg exited {}: {}\n{}", p.exitValue(), cmd, new String(output));
                 return null;
             }
@@ -218,6 +221,21 @@ public class HeicService {
         String m = e.getMessage();
         return m != null && (m.contains("error=2") || m.contains("No such file or directory")
                 || m.contains("CreateProcess error=2"));
+    }
+
+    /** ISO BMFF files (HEIC/HEIF) start with a "ftyp" box at byte 4. */
+    private static boolean looksLikeHeif(byte[] b) {
+        return b != null && b.length >= 12
+                && b[4] == 'f' && b[5] == 't' && b[6] == 'y' && b[7] == 'p';
+    }
+
+    private static String magicHex(byte[] b) {
+        StringBuilder sb = new StringBuilder();
+        int n = b == null ? 0 : Math.min(b.length, 16);
+        for (int i = 0; i < n; i++) {
+            sb.append(String.format("%02x ", b[i] & 0xff));
+        }
+        return sb.toString().trim();
     }
 
     private static void deleteRecursively(Path dir) {
