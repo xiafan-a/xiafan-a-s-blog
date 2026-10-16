@@ -21,7 +21,7 @@
 			<el-form label-width="90px">
 				<el-form-item label="HEIC 文件" required>
 					<el-upload ref="liveUpload" :auto-upload="false" :limit="1"
-					           accept=".heic,.heif,image/heic,image/heif"
+					           accept="*/*"
 					           :on-change="onLiveFileChange" :on-remove="onLiveFileRemove" action="#">
 						<el-button size="small">选择 .heic 文件</el-button>
 					</el-upload>
@@ -136,6 +136,13 @@
 				})
 			},
 			onLiveFileChange(file) {
+				const name = (file.name || '').toLowerCase()
+				if (!name.endsWith('.heic') && !name.endsWith('.heif')) {
+					this.msgError('请选择 .heic 或 .heif 格式的实况照片')
+					this.$refs.liveUpload.clearFiles()
+					this.liveFile = null
+					return
+				}
 				this.liveFile = file.raw
 			},
 			onLiveFileRemove() {
