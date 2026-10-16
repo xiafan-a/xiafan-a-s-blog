@@ -16,8 +16,8 @@ jobs:
     outputs:
       cms: ${{ steps.filter.outputs.cms }}
       view: ${{ steps.filter.outputs.view }}
-      agent_frontend: ${{ steps.filter.outputs.agent_frontend }}
       blog_api: ${{ steps.filter.outputs.blog_api }}
+      agent_frontend: ${{ steps.filter.outputs.agent_frontend }}
       agent_backend: ${{ steps.filter.outputs.agent_backend }}
       mcp: ${{ steps.filter.outputs.mcp }}
     steps:
@@ -37,10 +37,10 @@ jobs:
               - 'NBlog-master/blog-cms/**'
             view:
               - 'NBlog-master/blog-view/**'
-            agent_frontend:
-              - 'NBlog-master/blog-agent/**'
             blog_api:
               - 'blog-api/**'
+            agent_frontend:
+              - 'NBlog-master/blog-agent/**'
             agent_backend:
               - 'blog-agent/**'
             mcp:
