@@ -13,17 +13,17 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Splits an Apple Live Photo HEIC into a still JPEG and (when present) the short embedded video.
+ * Splits an Apple Live Photo HEIC into a still JPEG and (when the HEIC actually carries one) the
+ * short embedded video.
  *
- * <p>ffmpeg reads the HEIC still fine, but it exposes a Live Photo's video as many separate
- * single-frame HEVC streams rather than one timed stream. We therefore reconstruct the video by
- * re-muxing those frames into an MP4. Uses the ffmpeg/ffprobe binaries (must be on the server PATH).
+ * <p>A plain HEIC still stores the picture as tiled image items; those tiles are NOT video frames.
+ * A real Live Photo carries its motion as a timed HEVC track (multiple frames). We therefore only
+ * produce a video when such a timed track is present, and extract the cover via ffmpeg's native
+ * HEIF primary image (so tiled covers are assembled instead of yielding a black tile).
  */
 @Service
 public class HeicService {
@@ -37,15 +37,7 @@ public class HeicService {
     @Value("${app.ffmpeg.probe-path:ffprobe}")
     private String ffprobePath;
 
-    /** Fewer frames than this means there is no real motion sequence (just a plain HEIC still). */
-    private static final int MIN_VIDEO_FRAMES = 5;
-    /** Live Photos are ~3 s; clamp the reconstructed frame rate to a sane range. */
-    private static final double LIVE_PHOTO_SECONDS = 3.0;
-
-    private record StreamInfo(int index, int width, int height) {
-        long pixels() {
-            return (long) width * height;
-        }
+    private record StreamInfo(int index, int width, int height, int nbFrames) {
     }
 
     public record HeicExtraction(byte[] stillJpeg, byte[] videoMp4) {
@@ -70,11 +62,9 @@ public class HeicService {
                 throw new BusinessException(400, "HEIC 解码失败");
             }
 
-            StreamInfo still = pickStill(streams);
-            byte[] stillJpeg = extractStill(in, dir, still);
-
-            List<StreamInfo> videoStreams = pickVideoStreams(streams, still);
-            byte[] video = videoStreams.isEmpty() ? null : buildVideo(in, dir, videoStreams);
+            byte[] stillJpeg = extractStill(in, dir);
+            StreamInfo videoTrack = findVideoTrack(streams);
+            byte[] video = videoTrack == null ? null : extractVideo(in, dir, videoTrack);
             return new HeicExtraction(stillJpeg, video);
         } catch (IOException e) {
             log.warn("HEIC extraction failed: {}", e.getMessage());
@@ -89,7 +79,7 @@ public class HeicService {
     private List<StreamInfo> probeStreams(Path in) {
         byte[] json = runCommand(List.of(
                 ffprobePath, "-v", "error",
-                "-show_entries", "stream=index,codec_type,width,height",
+                "-show_entries", "stream=index,codec_type,width,height,nb_frames",
                 "-of", "json", in.toString()));
         if (json == null) {
             return List.of();
@@ -104,8 +94,9 @@ public class HeicService {
                 if ("video".equals(s.path("codec_type").asText())) {
                     int width = s.path("width").asInt(0);
                     int height = s.path("height").asInt(0);
+                    int nb = s.path("nb_frames").asInt(1);
                     if (width > 0 && height > 0) {
-                        streams.add(new StreamInfo(s.path("index").asInt(), width, height));
+                        streams.add(new StreamInfo(s.path("index").asInt(), width, height, nb));
                     }
                 }
             }
@@ -116,57 +107,31 @@ public class HeicService {
         }
     }
 
-    /** The cover still is the highest-resolution frame. */
-    private StreamInfo pickStill(List<StreamInfo> streams) {
-        return streams.stream().max(Comparator.comparingLong(StreamInfo::pixels)).orElseThrow();
+    /** A real Live Photo carries its video as a timed HEVC track (nb_frames &gt; 1); tiled stills
+     *  expose only single-frame image items. Returns the video track, or null when there is none. */
+    private StreamInfo findVideoTrack(List<StreamInfo> streams) {
+        return streams.stream()
+                .filter(s -> s.nbFrames() > 1)
+                .max(Comparator.comparingInt(StreamInfo::nbFrames))
+                .orElse(null);
     }
 
-    /** The video is the most frequent frame size (a real sequence), excluding the still's size. */
-    private List<StreamInfo> pickVideoStreams(List<StreamInfo> streams, StreamInfo still) {
-        Map<String, List<StreamInfo>> bySize = new LinkedHashMap<>();
-        for (StreamInfo s : streams) {
-            bySize.computeIfAbsent(s.width() + "x" + s.height(), k -> new ArrayList<>()).add(s);
-        }
-        String stillKey = still.width() + "x" + still.height();
-        List<StreamInfo> best = List.of();
-        for (Map.Entry<String, List<StreamInfo>> e : bySize.entrySet()) {
-            if (e.getKey().equals(stillKey)) {
-                continue;
-            }
-            if (e.getValue().size() > best.size()) {
-                best = e.getValue();
-            }
-        }
-        return best.size() >= MIN_VIDEO_FRAMES ? best : List.of();
-    }
-
-    private byte[] extractStill(Path in, Path dir, StreamInfo still) {
+    /** Extracts the cover still via ffmpeg's native HEIF primary image. The cover is stored as
+     *  tiled image items, so mapping a single stream index yields only one tile (a black/partial
+     *  image); omitting -map lets ffmpeg assemble the full picture. */
+    private byte[] extractStill(Path in, Path dir) {
         Path out = dir.resolve("still.jpg");
         if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
-                "-map", "0:v:" + still.index(), "-frames:v", "1", "-q:v", "2", out.toString())) == null) {
+                "-frames:v", "1", "-q:v", "2", out.toString())) == null) {
             return null;
         }
         return readIfExists(out);
     }
 
-    /** Re-muxes the selected video frames (in stream order) into a single MP4. */
-    private byte[] buildVideo(Path in, Path dir, List<StreamInfo> videoStreams) {
-        // Decode one frame per selected stream. A single bulk "-map 0:v" pass opens every HEVC
-        // decoder at once and gets OOM-killed (exit 137) on memory-limited containers, so we decode
-        // one stream at a time to keep peak memory low.
-        int k = 0;
-        for (StreamInfo s : videoStreams) {
-            Path frame = dir.resolve(String.format("seq_%04d.jpg", ++k));
-            if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
-                    "-map", "0:v:" + s.index(), "-frames:v", "1", "-q:v", "2",
-                    frame.toString())) == null) {
-                return null;
-            }
-        }
-        int fps = (int) Math.round(Math.max(10.0, Math.min(30.0, videoStreams.size() / LIVE_PHOTO_SECONDS)));
+    private byte[] extractVideo(Path in, Path dir, StreamInfo track) {
         Path out = dir.resolve("video.mp4");
-        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-framerate", String.valueOf(fps),
-                "-i", dir.resolve("seq_%04d.jpg").toString(),
+        if (runCommand(List.of(ffmpegPath, "-v", "error", "-y", "-i", in.toString(),
+                "-map", "0:v:" + track.index(),
                 "-c:v", "libx264", "-pix_fmt", "yuv420p", "-movflags", "+faststart",
                 out.toString())) == null) {
             return null;
@@ -196,9 +161,8 @@ public class HeicService {
             }
             if (p.exitValue() != 0) {
                 if (p.exitValue() == 137) {
-                    log.error("ffmpeg was killed (exit 137, likely OOM). Container memory limit is too low "
-                            + "to decode this HEIC's many HEVC streams. Raise the container memory "
-                            + "(docker run -m / compose mem_limit) or decode frames one at a time.");
+                    log.error("ffmpeg was killed (exit 137, likely OOM). Raise the container memory "
+                            + "(docker run -m / compose mem_limit).");
                 }
                 log.warn("ffmpeg exited {}: {}\n{}", p.exitValue(), cmd, new String(output));
                 return null;
